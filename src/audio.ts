@@ -5,8 +5,8 @@ export type Channel = 'chant' | 'music' | 'ambience' | 'sfx';
 export const CHANNELS: Channel[] = ['chant', 'music', 'ambience', 'sfx'];
 
 export const CHANT_CLIPS = ['chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught'] as const;
-export const MUSIC_CLIPS = ['music_drums'] as const;
-export const AMBIENCE_CLIPS = ['ambience_a', 'ambience_b'] as const;
+export const MUSIC_CLIPS = ['drum_loop'] as const;
+export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
 export type ClipName = (typeof CHANT_CLIPS)[number] | (typeof MUSIC_CLIPS)[number] | (typeof AMBIENCE_CLIPS)[number];
 
 const CLIP_CHANNEL: Record<ClipName, Channel> = {
@@ -16,9 +16,9 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   chant_open: 'chant',
   chant_hunt: 'chant',
   caught: 'chant',
-  music_drums: 'music',
-  ambience_a: 'ambience',
-  ambience_b: 'ambience',
+  drum_loop: 'music',
+  amb_market: 'ambience',
+  amb_generator: 'ambience',
 };
 
 const MUTE_KEY = 'boju.muted';
@@ -83,7 +83,7 @@ function drumHit(oc: OfflineAudioContext, t: number, freq: number, dur: number, 
 }
 
 async function synthPlaceholder(name: ClipName): Promise<AudioBuffer> {
-  if (name === 'music_drums') {
+  if (name === 'drum_loop') {
     // two bars of 4 hits at 120 bpm
     const dur = 2;
     const oc = new OfflineAudioContext(1, SR * dur, SR);
@@ -92,7 +92,7 @@ async function synthPlaceholder(name: ClipName): Promise<AudioBuffer> {
     drumHit(oc, 1.75, 180, 0.15, 0.4);
     return oc.startRendering();
   }
-  if (name === 'ambience_a' || name === 'ambience_b') {
+  if (name === 'amb_market' || name === 'amb_generator') {
     // soft filtered noise; A is lower, B is brighter
     const dur = 4;
     const oc = new OfflineAudioContext(1, SR * dur, SR);
@@ -106,7 +106,7 @@ async function synthPlaceholder(name: ClipName): Promise<AudioBuffer> {
     src.buffer = noise;
     const lp = oc.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = name === 'ambience_a' ? 400 : 1400;
+    lp.frequency.value = name === 'amb_market' ? 400 : 1400;
     const g = oc.createGain();
     g.gain.value = 0.35;
     src.connect(lp).connect(g).connect(oc.destination);

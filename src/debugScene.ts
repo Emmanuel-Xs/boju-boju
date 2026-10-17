@@ -1,10 +1,11 @@
 // /?debug test scene: every pose and animation, three sample start.ng styles plus a fallback case, painting and hunt mode.
-// URL knobs for screenshots: &p=<player state> &m=<masquerade state> &hunt=1 &cam=chars|masq|side|masqside &only=<char index>
+// URL knobs for screenshots: &p=<player state> &m=<masquerade state> &hunt=1 &cam=chars|masq|side|masqside &only=<char index> &susp=0..1 &burst=1 &splash=1
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createCharacter, PLAYER_STATES, type Character, type PlayerState } from './character';
 import { createMasquerade, MASQUERADE_STATES, type MasqueradeState } from './masquerade';
 import { toon } from './toon';
+import { Fx, applyPixelRatio } from './fx';
 
 const SAMPLE_STYLES: { label: string; style: Record<string, unknown> | null }[] = [
   {
@@ -27,7 +28,7 @@ const WALL_COLOR = '#c98a4b';
 export function startDebugScene(): void {
   const q = new URLSearchParams(location.search);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  applyPixelRatio(renderer);
   renderer.setSize(innerWidth, innerHeight);
   document.body.appendChild(renderer.domElement);
 
@@ -75,10 +76,36 @@ export function startDebugScene(): void {
 
   const only = q.get('only');
   if (only !== null) chars.forEach((c, i) => (c.group.visible = i === Number(only)));
+  // effects
+  const fx = new Fx(scene);
+  fx.dust.setArea(new THREE.Vector3(-0.8, 1.6, 0.5), new THREE.Vector3(16, 3.2, 8), sun.position.clone().negate());
+  const cone = fx.addVisionCone(masq.group, 5, 70);
+  const bang = fx.addSuspicionIndicator(masq.group);
+  let suspicion = Number(q.get('susp') ?? 0);
+  const setSuspicion = (v: number) => {
+    suspicion = v;
+    cone.setSuspicion(v);
+    bang.set(v);
+  };
+  setSuspicion(suspicion);
+  const torso = new THREE.Vector3();
+  const splashAt = (c: Character, zone: 'top' | 'bottom') => {
+    c.group.getWorldPosition(torso);
+    torso.y += zone === 'top' ? 1.25 : 0.6;
+    fx.paintSplash(torso, c.getZoneColor(zone));
+  };
+  const burstAt = () => {
+    masq.group.getWorldPosition(torso);
+    torso.y += 1.5;
+    fx.caughtBurst(torso);
+  };
+
   const pState = q.get('p') as PlayerState | null;
   if (pState && PLAYER_STATES.includes(pState)) chars.forEach((c) => c.play(pState, 0.001));
   const mState = q.get('m') as MasqueradeState | null;
   if (mState && MASQUERADE_STATES.includes(mState)) masq.play(mState, 0.001);
+  if (q.get('splash') === '1') setTimeout(() => chars.forEach((c) => splashAt(c, 'top')), 2150);
+  if (q.get('burst') === '1') setTimeout(burstAt, 2150);
   if (q.get('hunt') === '1') chars.forEach((c) => c.setHuntMode(true));
 
   // UI
@@ -133,6 +160,7 @@ export function startDebugScene(): void {
     i.type = 'color';
     i.value = '#c98a4b';
     i.oninput = () => chars.forEach((c) => c.setZoneColor(zone, i.value));
+    i.onchange = () => chars.forEach((c) => splashAt(c, zone)); // picker closed: splash in the picked colour
     l.appendChild(i);
     paint.appendChild(l);
     return i;
@@ -154,6 +182,28 @@ export function startDebugScene(): void {
     });
   });
 
+  const fr = section('Effects');
+  btn(fr, 'paint splash (top)', () => chars.forEach((c) => splashAt(c, 'top')));
+  btn(fr, 'paint splash (bottom)', () => chars.forEach((c) => splashAt(c, 'bottom')));
+  btn(fr, 'caught burst', burstAt);
+  let dustOn = true;
+  btn(fr, 'toggle dust', () => (fx.dust.pool.points.visible = dustOn = !dustOn));
+  const sl = document.createElement('label');
+  sl.style.cssText = 'display:flex;gap:6px;width:100%;align-items:center';
+  const slInput = document.createElement('input');
+  slInput.type = 'range';
+  slInput.min = '0';
+  slInput.max = '1';
+  slInput.step = '0.01';
+  slInput.value = String(suspicion);
+  slInput.style.flex = '1';
+  slInput.oninput = () => setSuspicion(Number(slInput.value));
+  sl.append('suspicion', slInput);
+  fr.appendChild(sl);
+  const stats = document.createElement('div');
+  stats.style.cssText = 'width:100%;opacity:.8';
+  fr.appendChild(stats);
+
   const legend = section('Sample styles (left to right)');
   SAMPLE_STYLES.forEach((s, i) => {
     const d = document.createElement('div');
@@ -165,11 +215,13 @@ export function startDebugScene(): void {
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
+    applyPixelRatio(renderer);
     renderer.setSize(innerWidth, innerHeight);
   });
 
   const clock = new THREE.Clock();
   let ang = 0;
+  let statTime = 0;
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1);
     chars.forEach((c) => c.update(dt));
@@ -182,8 +234,14 @@ export function startDebugScene(): void {
       masq.group.rotation.y = -0.35;
     }
     masq.update(dt);
+    fx.update(dt, camera, renderer);
     controls.update();
     renderer.render(scene, camera);
+    statTime += dt;
+    if (statTime > 0.5) {
+      statTime = 0;
+      stats.textContent = `draw calls ${renderer.info.render.calls}, tris ${renderer.info.render.triangles}, pixel ratio ${renderer.getPixelRatio()}`;
+    }
     document.documentElement.dataset.frames = String(Number(document.documentElement.dataset.frames ?? 0) + 1);
   });
 }

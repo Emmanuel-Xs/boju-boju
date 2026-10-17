@@ -104,7 +104,7 @@ const CLIPS: Record<MasqueradeState, Clip<MasqueradeState>> = {
 
 // --- fabric strips -----------------------------------------------------------
 
-const PALETTE = ['#ff3d6e', '#ffb400', '#22c1c3', '#7bd236', '#ff7a00', '#b04cff', '#2f80ff', '#ff5ea8'];
+export const MASQUERADE_COLORS = ['#ff3d6e', '#ffb400', '#22c1c3', '#7bd236', '#ff7a00', '#b04cff', '#2f80ff', '#ff5ea8'];
 
 const HEM_Y = 0.18; // world height of the hem; the body pivot sits here
 const CONE_H = 1.3;
@@ -125,7 +125,7 @@ function stripGeo(len: number, width: number, taperEnd: number) {
 }
 
 interface Seg {
-  pivot: THREE.Object3D;
+  pivot: THREE.Object3D; // transform-only (not in the scene); rendered through the instanced meshes
   ax: number;
   az: number;
   vx: number;
@@ -134,6 +134,8 @@ interface Seg {
 interface Strip {
   theta: number;
   phase: number;
+  anchor: THREE.Matrix4;
+  width: number;
   segs: [Seg, Seg];
 }
 
@@ -234,14 +236,15 @@ export function createMasquerade(): Masquerade {
   // feather crest
   for (let i = 0; i < 5; i++) {
     const a = (i - 2) * 0.42;
-    const f = mesh(facet(new THREE.ConeGeometry(0.06, 0.42, 4).translate(0, 0.21, 0)), mat(PALETTE[(i * 3) % PALETTE.length]), 0, maskCenterY + 0.24, -0.02);
+    const f = mesh(facet(new THREE.ConeGeometry(0.06, 0.42, 4).translate(0, 0.21, 0)), mat(MASQUERADE_COLORS[(i * 3) % MASQUERADE_COLORS.length]), 0, maskCenterY + 0.24, -0.02);
     f.scale.z = 0.35;
     f.rotation.z = -a;
     f.rotation.x = -0.15;
     head.add(f);
   }
 
-  // strips: five staggered rings, two hinged segments each
+  // strips: five staggered rings, two hinged segments each. The hinges are plain Object3Ds used for
+  // their matrices; all 60 upper segments are one InstancedMesh and all 60 lower segments another.
   const strips: Strip[] = [];
   const rings = [
     { y: 1.2, n: 8 },
@@ -251,35 +254,40 @@ export function createMasquerade(): Masquerade {
     { y: 0.2, n: 16 },
   ];
   const segLen = 0.3;
-  const geoCache = new Map<string, THREE.BufferGeometry>();
-  const geo = (len: number, w: number, taper: number) => {
-    const k = `${len}|${w}|${taper}`;
-    let g = geoCache.get(k);
-    if (!g) geoCache.set(k, (g = stripGeo(len, w, taper)));
-    return g;
-  };
-  const stripMats = PALETTE.map((c) => mat(c));
+  const total = rings.reduce((a, r) => a + r.n, 0);
+  const stripMat = mat('#ffffff'); // tinted per instance
+  const upperGeo = stripGeo(segLen, 1, 0.95);
+  const lowerGeo = stripGeo(segLen, 1, 0.25);
+  const upper = new THREE.InstancedMesh(upperGeo, stripMat, total);
+  const lower = new THREE.InstancedMesh(lowerGeo, stripMat, total);
+  for (const im of [upper, lower]) {
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.frustumCulled = false;
+    body.add(im);
+  }
+  const tint = new THREE.Color();
+  let idx = 0;
   rings.forEach((ring, ri) => {
     const width = 0.2 - ri * 0.012;
     for (let i = 0; i < ring.n; i++) {
       const theta = ((i + (ri % 2) * 0.5) / ring.n) * TAU;
       const r = radiusAt(ring.y) + 0.018 + ri * 0.004;
-      const anchor = new THREE.Group();
+      const anchor = new THREE.Object3D();
       anchor.position.set(Math.sin(theta) * r, ring.y, Math.cos(theta) * r);
       anchor.rotation.y = theta; // local +z points outward
-      const c1 = (i + ri * 3) % PALETTE.length;
-      const c2 = (i + ri * 3 + 3) % PALETTE.length;
-      const p1 = new THREE.Group();
-      p1.add(mesh(geo(segLen, width, 0.95), stripMats[c1]));
-      const p2 = new THREE.Group();
+      anchor.updateMatrix();
+      upper.setColorAt(idx, tint.set(MASQUERADE_COLORS[(i + ri * 3) % MASQUERADE_COLORS.length]));
+      lower.setColorAt(idx, tint.set(MASQUERADE_COLORS[(i + ri * 3 + 3) % MASQUERADE_COLORS.length]));
+      idx++;
+      const p1 = new THREE.Object3D();
+      const p2 = new THREE.Object3D();
       p2.position.y = -segLen;
-      p2.add(mesh(geo(segLen, width * 0.95, 0.25), stripMats[c2], 0, 0, 0.004));
-      p1.add(p2);
-      anchor.add(p1);
-      body.add(anchor);
+      p2.updateMatrix();
       strips.push({
         theta,
         phase: Math.random() * TAU,
+        anchor: anchor.matrix.clone(),
+        width,
         segs: [
           { pivot: p1, ax: -SLOPE, az: 0, vx: 0, vz: 0 },
           { pivot: p2, ax: 0, az: 0, vx: 0, vz: 0 },
@@ -287,8 +295,29 @@ export function createMasquerade(): Masquerade {
       });
     }
   });
+  const m1 = new THREE.Matrix4();
+  const m2 = new THREE.Matrix4();
+  const out = new THREE.Matrix4();
+  const scaleM = new THREE.Matrix4();
+  const lift = new THREE.Matrix4().makeTranslation(0, 0, 0.004); // keeps the lower segment off the upper one's face
+  function writeStrips() {
+    strips.forEach((s, i) => {
+      const [a, b] = s.segs;
+      a.pivot.rotation.set(a.ax, 0, a.az);
+      a.pivot.updateMatrix();
+      b.pivot.rotation.set(b.ax, 0, b.az);
+      b.pivot.updateMatrix();
+      m1.copy(s.anchor).multiply(a.pivot.matrix);
+      upper.setMatrixAt(i, out.copy(m1).multiply(scaleM.makeScale(s.width, 1, 1)));
+      m2.copy(m1).multiply(b.pivot.matrix).multiply(lift);
+      lower.setMatrixAt(i, out.copy(m2).multiply(scaleM.makeScale(s.width * 0.95, 1, 1)));
+    });
+    upper.instanceMatrix.needsUpdate = true;
+    lower.instanceMatrix.needsUpdate = true;
+  }
 
   const animator = new Animator<MasqueradeState>(J, CLIPS, 'search_walk', 0.25);
+  writeStrips();
 
   // movement tracking for the cloth
   const prevPos = new THREE.Vector3();
@@ -348,9 +377,9 @@ export function createMasquerade(): Masquerade {
         seg.vz += ((tz - seg.az) * K - seg.vz * D) * dt;
         seg.ax += seg.vx * dt;
         seg.az += seg.vz * dt;
-        seg.pivot.rotation.set(seg.ax, 0, seg.az);
       });
     }
+    writeStrips();
   }
 
   return {
@@ -362,7 +391,10 @@ export function createMasquerade(): Masquerade {
       group.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
       });
-      geoCache.forEach((g) => g.dispose());
+      upperGeo.dispose();
+      lowerGeo.dispose();
+      upper.dispose();
+      lower.dispose();
       owned.forEach((m) => m.dispose());
     },
   };

@@ -20,7 +20,8 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 
 async function convert(file) {
-  const name = path.basename(file, path.extname(file));
+  // raw-assets/models/<pack>/<name>.glb -> output name "<pack>_<name>"
+  const name = file.slice(0, -path.extname(file).length).split(path.sep).join('_');
   const doc = await io.read(path.join(srcDir, file));
 
   await doc.transform(
@@ -59,7 +60,7 @@ async function convert(file) {
   console.log(`${file} -> public/models/${name}.json  (${kb(before)} -> ${kb(after)}, ${texCount} texture(s))`);
 }
 
-const files = (await readdir(srcDir).catch(() => [])).filter((f) => f.toLowerCase().endsWith('.glb'));
+const files = (await readdir(srcDir, { recursive: true }).catch(() => [])).filter((f) => f.toLowerCase().endsWith('.glb'));
 if (!files.length) {
   console.log('No .glb files in raw-assets/models/, nothing to convert.');
 }

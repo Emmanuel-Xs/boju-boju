@@ -72,8 +72,8 @@ export function mountAudioDebug(): void {
       else audio.stop(n, 0.5);
     });
   }
-  button(loops, 'crossfade A→B', () => void audio.crossfade('ambience_a', 'ambience_b', 2));
-  button(loops, 'crossfade B→A', () => void audio.crossfade('ambience_b', 'ambience_a', 2));
+  button(loops, 'crossfade market→generator', () => void audio.crossfade('amb_market', 'amb_generator', 2));
+  button(loops, 'crossfade generator→market', () => void audio.crossfade('amb_generator', 'amb_market', 2));
   button(loops, 'stop all', () => audio.stopAll(0.2));
 
   const chant = row('Chant sequence');

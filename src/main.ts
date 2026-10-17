@@ -24,7 +24,7 @@ function pipelineSmokeTest() {
   camera.lookAt(0, 0.5, 0);
 
   // Relative URL: resolves next to index.html, works under any start.ng sub-path.
-  const model = new URLSearchParams(location.search).get('model') ?? 'chair';
+  const model = new URLSearchParams(location.search).get('model') ?? 'furn_chair';
   new GLTFLoader().load(
     `./models/${model}.json`,
     (gltf) => {
