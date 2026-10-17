@@ -53,6 +53,27 @@ export function resolveStyle(input?: Record<string, unknown> | null): StartNgSty
   };
 }
 
+/** Picks a scarf colour that stands out from the player's top and skin. */
+const SCARF_CANDIDATES = ['#ffd23f', '#e63946', '#ffffff', '#1d3557', '#2a9d8f', '#f4a261', '#7b2cbf'];
+function scarfColor(style: StartNgStyle): string {
+  const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const dist = (a: string, b: string) => {
+    const [r1, g1, b1] = rgb(a);
+    const [r2, g2, b2] = rgb(b);
+    return Math.sqrt(2 * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + 3 * (b1 - b2) ** 2);
+  };
+  let best = SCARF_CANDIDATES[0];
+  let bestScore = -1;
+  for (const c of SCARF_CANDIDATES) {
+    const score = dist(c, style.primaryColor) + 0.5 * dist(c, style.skinColor);
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
 // --- animation states --------------------------------------------------------
 
 export const PLAYER_STATES = ['idle', 'walk', 'run', 'stand_stiff', 'crouch', 'wall_flat', 'curl_ball'] as const;
@@ -388,19 +409,33 @@ export function createCharacter(input?: Record<string, unknown> | null): Charact
       }
       break;
     case 'beard': {
-      const b = mesh(facet(new THREE.SphereGeometry(0.125, 8, 6, 0, TAU, Math.PI * 0.42, Math.PI * 0.5)), hairMat, 0, -0.03, 0.045);
-      b.scale.set(1, 1.1, 0.9);
-      onHead(b, acc);
+      // A cap of the skull sphere from the lip line down (polar angle 112..170 deg), front half only, so it can't reach the eyes
+      // (eyes sit near 85 deg) or the ears.
+      const beard = mesh(
+        facet(new THREE.SphereGeometry(0.182, 10, 6, Math.PI / 2 - 1.1, 2.2, Math.PI * 0.62, Math.PI * 0.3)),
+        hairMat,
+        0,
+        0,
+        0.012,
+      );
+      beard.scale.set(1, 1, 1.08);
+      onHead(beard, acc);
+      onHead(mesh(facet(new THREE.SphereGeometry(0.045, 6, 4)), hairMat, 0, -0.145, 0.15), acc); // chin tuft
       break;
     }
     case 'scarf': {
+      // two turns stacked around the neck, sitting on the shoulders and tucked under the chin, plus a tail down the chest
       const s = new THREE.Group();
-      const sm = mat('#e63946');
-      s.add(mesh(facet(new THREE.TorusGeometry(0.115, 0.045, 5, 10)).rotateX(Math.PI / 2), sm, 0, 0, 0));
-      const tail = mesh(facet(new THREE.BoxGeometry(0.09, 0.3, 0.025)), sm, 0.07, -0.16, 0.115);
-      tail.rotation.z = 0.08;
+      const sm = mat(scarfColor(style));
+      const turn1 = mesh(facet(new THREE.TorusGeometry(0.125, 0.048, 6, 12)).rotateX(Math.PI / 2), sm, 0, 0.515, 0);
+      turn1.scale.set(1, 1, 0.9);
+      const turn2 = mesh(facet(new THREE.TorusGeometry(0.108, 0.04, 6, 12)).rotateX(Math.PI / 2), sm, 0, 0.555, 0);
+      turn2.rotation.x = 0.12;
+      s.add(turn1, turn2);
+      const tail = mesh(facet(new THREE.BoxGeometry(0.1, 0.3, 0.03)), sm, 0.075, 0.33, 0.165);
+      tail.rotation.z = 0.06;
       s.add(tail);
-      s.position.set(0, 0.52, 0);
+      for (let i = 0; i < 4; i++) s.add(mesh(new THREE.BoxGeometry(0.014, 0.05, 0.02), sm, 0.04 + i * 0.023, 0.165, 0.158)); // fringe
       spine.add(s);
       acc.push(s);
       break;

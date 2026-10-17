@@ -585,7 +585,7 @@ export class Fx {
     return cone;
   }
 
-  addSuspicionIndicator(parent: THREE.Object3D, height = 2.85): SuspicionIndicator {
+  addSuspicionIndicator(parent: THREE.Object3D, height = 3.15): SuspicionIndicator {
     const ind = createIndicator();
     ind.mesh.position.y = height;
     parent.add(ind.mesh);

@@ -1,5 +1,5 @@
 // /?debug test scene: every pose and animation, three sample start.ng styles plus a fallback case, painting and hunt mode.
-// URL knobs for screenshots: &p=<player state> &m=<masquerade state> &hunt=1 &cam=chars|masq|side|masqside|top|topclose &only=<char index> &susp=0..1 &burst=1 &splash=1 &masq=0
+// URL knobs for screenshots: &p=<player state> &m=<masquerade state> &hunt=1 &cam=chars|masq|masqclose|masqtop|compare|side|masqside|top|topclose|face1|face2 &only=<char index> &susp=0..1 &burst=1 &splash=1 &masq=0 &yaw=<radians for the masquerade>
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createCharacter, PLAYER_STATES, type Character, type PlayerState } from './character';
@@ -13,12 +13,16 @@ const SAMPLE_STYLES: { label: string; style: Record<string, unknown> | null }[] 
     style: { body: 'female', primaryColor: '#f4a300', secondaryColor: '#2b4c9b', skinColor: '#8d5524', hairColor: '#1b1b1b', hair: 'braids', hat: 'crown', accessory: 'earrings' },
   },
   {
-    label: 'afro + glasses + backpack',
-    style: { body: 'male', primaryColor: '#2fa84f', secondaryColor: '#e8d9b5', skinColor: '#c68642', hairColor: '#3b2314', hair: 'afro', hat: 'none', accessory: 'glasses' },
+    label: 'afro + beard',
+    style: { body: 'male', primaryColor: '#2fa84f', secondaryColor: '#e8d9b5', skinColor: '#c68642', hairColor: '#3b2314', hair: 'afro', hat: 'none', accessory: 'beard' },
   },
   {
-    label: 'top hat + scarf + beard',
+    label: 'top hat + dreads + scarf',
     style: { body: 'male', primaryColor: '#d94f4f', secondaryColor: '#33384d', skinColor: '#f1c27d', hairColor: '#e0b040', hair: 'dreads', hat: 'tophat', accessory: 'scarf' },
+  },
+  {
+    label: 'bun + beanie + glasses',
+    style: { body: 'female', primaryColor: '#7b2cbf', secondaryColor: '#222831', skinColor: '#e0ac69', hairColor: '#5a3825', hair: 'bun', hat: 'beanie', accessory: 'glasses' },
   },
   { label: 'fallback (unknown values)', style: { body: 'robot', hair: 'mohawk', hat: 'wizard', primaryColor: 'blue', accessory: 5 } },
 ];
@@ -51,12 +55,17 @@ export function startDebugScene(): void {
   // default view is shifted left so the side panel doesn't cover the first character
   const cams: Record<string, [number[], number[]]> = {
     default: [[-0.8, 2.4, 9.5], [-0.8, 1.0, 0]],
-    chars: [[-2.4, 1.4, 6.2], [-2.4, 0.95, 0]],
-    masq: [[3.7, 1.5, 5.2], [3.7, 1.0, 0]],
-    side: [[3.0, 1.0, 0], [-4.2, 0.8, 0]],
-    top: [[-2.4, 4.2, 0.9], [-2.4, 0, 0]], // roughly what a top-down game camera sees
+    chars: [[-1.5, 1.4, 7.4], [-1.5, 0.95, 0]],
+    masq: [[3.9, 1.7, 7.6], [3.9, 1.3, 0]],
+    masqclose: [[3.9, 1.95, 4.6], [3.9, 1.45, 0]],
+    masqtop: [[3.9, 5.6, 2.8], [3.9, 0, 0]],
+    compare: [[2.6, 1.5, 8.6], [2.6, 1.25, 0]],
+    face1: [[-3.0, 1.74, 1.4], [-3.0, 1.68, 0]],
+    face2: [[-1.5, 1.66, 1.6], [-1.5, 1.52, 0]],
+    side: [[3.0, 1.0, 0], [-4.5, 0.8, 0]],
+    top: [[-1.5, 5.0, 1.0], [-1.5, 0, 0]], // roughly what a top-down game camera sees
     topclose: [[-4.2, 2.6, 0.5], [-4.2, 0, 0]],
-    masqside: [[8.5, 1.3, 0], [3.7, 1.0, 0]],
+    masqside: [[9.5, 1.5, 0], [3.9, 1.3, 0]],
   };
   const [camPos, camTarget] = cams[q.get('cam') ?? 'default'] ?? cams.default;
   camera.position.set(...(camPos as [number, number, number]));
@@ -67,13 +76,14 @@ export function startDebugScene(): void {
   // characters
   const chars: Character[] = SAMPLE_STYLES.map((s, i) => {
     const c = createCharacter(s.style);
-    c.group.position.set(-4.2 + i * 1.7, 0, 0);
+    c.group.position.set(-4.5 + i * 1.5, 0, 0);
     scene.add(c.group);
     return c;
   });
+  const masqYaw = Number(q.get('yaw') ?? -0.35);
   const masq = createMasquerade();
-  masq.group.position.set(3.7, 0, 0);
-  masq.group.rotation.y = -0.35;
+  masq.group.position.set(3.9, 0, 0);
+  masq.group.rotation.y = masqYaw;
   scene.add(masq.group);
 
   if (q.get('masq') === '0') masq.group.visible = false;
@@ -233,8 +243,8 @@ export function startDebugScene(): void {
       masq.group.position.set(Math.sin(ang) * 2.2 + 1.5, 0, Math.cos(ang) * 2.2 + 1);
       masq.group.rotation.y = ang + Math.PI / 2;
     } else {
-      masq.group.position.set(3.7, 0, 0);
-      masq.group.rotation.y = -0.35;
+      masq.group.position.set(3.9, 0, 0);
+      masq.group.rotation.y = masqYaw;
     }
     masq.update(dt);
     fx.update(dt, camera, renderer);

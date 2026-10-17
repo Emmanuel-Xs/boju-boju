@@ -1,6 +1,7 @@
-// Playful masquerade seeker: a cone of swaying fabric strips under a carved, grinning mask. Forward is +z.
+// Egungun-style masquerade seeker: a fully cloth-covered figure, a dark net panel where a face would be, a carved wooden crest,
+// and long heavy cloth panels hanging in three tiers from a yoke ring just under the head (so the net panel stays visible). Forward is +z. About 1.4x the player's height.
 import * as THREE from 'three';
-import { toon, facet } from './toon';
+import { toon, toonGradient, facet } from './toon';
 import { Animator, type Clip, type Pose } from './animator';
 import { bakeSkinned } from './bake';
 
@@ -18,66 +19,66 @@ const TAU = Math.PI * 2;
 const ease = (x: number) => 1 - (1 - Math.min(1, Math.max(0, x))) ** 3;
 
 const CLIPS: Record<MasqueradeState, Clip<MasqueradeState>> = {
-  // Counting with eyes covered: hands over the mask, swaying side to side.
+  // Counting with eyes covered: both hands over the net panel, swaying slowly side to side.
   sing_eyes_covered: (t) => {
-    const sw = Math.sin(t * 2.2);
+    const sw = Math.sin(t * 1.8);
     return {
-      body: { rz: sw * 0.07, rx: 0.03 },
-      head: { rz: -sw * 0.14, ry: Math.sin(t * 1.1) * 0.12, py: Math.abs(Math.sin(t * 4.4)) * 0.015 },
-      shoulderL: { rx: -2.0, rz: 0.62 },
-      shoulderR: { rx: -2.0, rz: -0.62 },
-      elbowL: { rx: -1.4 },
-      elbowR: { rx: -1.4 },
+      body: { rz: sw * 0.035, rx: 0.02 },
+      head: { rz: -sw * 0.1, ry: Math.sin(t * 0.9) * 0.1, py: Math.abs(Math.sin(t * 3.6)) * 0.012 },
+      shoulderL: { rx: -1.9, rz: 0.62 },
+      shoulderR: { rx: -1.9, rz: -0.62 },
+      elbowL: { rx: -1.5 },
+      elbowR: { rx: -1.5 },
       footL: { py: Math.max(0, sw) * 0.03 },
       footR: { py: Math.max(0, -sw) * 0.03 },
     };
   },
   search_walk: (t) => {
-    const ph = t * TAU * 1.1;
+    const ph = t * TAU * 0.9;
     const s = Math.sin(ph);
     return {
-      root: { py: Math.abs(Math.cos(ph)) * 0.025 },
-      body: { rx: 0.08, rz: s * 0.04 },
-      head: { ry: Math.sin(t * 0.9) * 0.75, rx: 0.06 },
-      shoulderL: { rx: s * 0.45, rz: -0.35 },
-      shoulderR: { rx: -s * 0.45, rz: 0.35 },
+      root: { py: Math.abs(Math.cos(ph)) * 0.02 },
+      body: { rx: 0.05, rz: s * 0.03 },
+      head: { ry: Math.sin(t * 0.8) * 0.75, rx: 0.05 },
+      shoulderL: { rx: s * 0.4, rz: -0.3 },
+      shoulderR: { rx: -s * 0.4, rz: 0.3 },
       elbowL: { rx: -0.35 },
       elbowR: { rx: -0.35 },
-      footL: { pz: s * 0.16, py: Math.max(0, Math.cos(ph)) * 0.07 },
-      footR: { pz: -s * 0.16, py: Math.max(0, -Math.cos(ph)) * 0.07 },
+      footL: { pz: s * 0.18, py: Math.max(0, Math.cos(ph)) * 0.07 },
+      footR: { pz: -s * 0.18, py: Math.max(0, -Math.cos(ph)) * 0.07 },
     };
   },
-  // Standing still, scanning, one hand shading the brow, one on the hip.
+  // Standing still, scanning slowly, one hand shading the brow, one on the hip.
   look_around: (t) => {
-    const a = Math.sin(t * 1.3);
+    const a = Math.sin(t * 1.1);
     return {
-      body: { ry: Math.sin(t * 1.3 - 0.7) * 0.28, rx: 0.05 },
-      head: { ry: a * 1.0, rx: 0.04, rz: Math.sin(t * 2.6) * 0.04 },
-      shoulderR: { rx: -2.1, rz: -0.2 },
+      body: { ry: Math.sin(t * 1.1 - 0.7) * 0.25, rx: 0.03 },
+      head: { ry: a * 1.0, rx: 0.04, rz: Math.sin(t * 2.2) * 0.04 },
+      shoulderR: { rx: -2.3, rz: -0.25 },
       elbowR: { rx: -1.5 },
-      shoulderL: { rx: 0.0, rz: -0.55 },
+      shoulderL: { rx: 0.0, rz: -0.5 },
       elbowL: { rx: -0.9 },
     };
   },
-  // "Hmm... somebody is a suspiciously good lamp." Hand on chin, leaning in.
+  // Leaning in, hand at the chin, head tilted: "somebody is a suspiciously good lamp".
   suspicious_lean: (t) => ({
-    body: { rx: 0.32, rz: 0.05 + Math.sin(t * 1.4) * 0.02 },
-    head: { rx: 0.15, rz: 0.3, ry: Math.sin(t * 0.8) * 0.2 },
-    shoulderL: { rx: -1.55, rz: 0.4 },
-    elbowL: { rx: -2.0 },
-    shoulderR: { rx: 0.5, rz: -0.25 },
+    body: { rx: 0.2, rz: 0.03 + Math.sin(t * 1.3) * 0.015 },
+    head: { rx: 0.15, rz: 0.25, ry: Math.sin(t * 0.8) * 0.2 },
+    shoulderL: { rx: -1.7, rz: 0.4 },
+    elbowL: { rx: -2.1 },
+    shoulderR: { rx: 0.4, rz: -0.25 },
     elbowR: { rx: -0.4 },
     footL: { pz: 0.12 },
     footR: { pz: -0.06 },
   }),
-  // Gotcha! Big grabby lunge, arms wide.
+  // Gotcha: a big forward lunge, arms wide.
   catch_lunge: (t) => {
     const k = ease(t / 0.2);
     const w = Math.sin(t * 18) * 0.05 * k;
     return {
-      root: { py: 0.04 * k },
-      body: { rx: 0.7 * k },
-      head: { rx: -0.35 * k },
+      root: { py: 0.03 * k },
+      body: { rx: 0.42 * k },
+      head: { rx: -0.25 * k },
       shoulderL: { rx: -1.5 * k + w, rz: -0.4 * k },
       shoulderR: { rx: -1.5 * k - w, rz: 0.4 * k },
       elbowL: { rx: -0.25 * k },
@@ -86,65 +87,90 @@ const CLIPS: Record<MasqueradeState, Clip<MasqueradeState>> = {
       footR: { pz: -0.22 * k },
     };
   },
+  // Spinning with arms up: the panels fly out.
   victory_dance: (t) => {
-    const ph = t * TAU * 1.6;
+    const ph = t * TAU * 1.4;
     const s = Math.sin(ph);
     return {
-      root: { py: Math.abs(s) * 0.14, ry: t * 3 },
-      body: { rz: s * 0.15 },
-      head: { rz: -s * 0.2, rx: -0.15 },
-      shoulderL: { rx: -2.8, rz: -0.5 + s * 0.35 },
-      shoulderR: { rx: -2.8, rz: 0.5 - s * 0.35 },
+      root: { py: Math.abs(s) * 0.1, ry: t * 4.5 },
+      body: { rz: s * 0.06 },
+      head: { rz: -s * 0.12, rx: -0.1 },
+      shoulderL: { rx: -2.7, rz: -0.55 + s * 0.3 },
+      shoulderR: { rx: -2.7, rz: 0.55 - s * 0.3 },
       elbowL: { rx: -0.3 },
       elbowR: { rx: -0.3 },
-      footL: { py: Math.max(0, s) * 0.1 },
-      footR: { py: Math.max(0, -s) * 0.1 },
+      footL: { py: Math.max(0, s) * 0.08 },
+      footR: { py: Math.max(0, -s) * 0.08 },
     };
   },
 };
 
-// --- fabric strips -----------------------------------------------------------
+// --- palette -------------------------------------------------------------------
 
-export const MASQUERADE_COLORS = ['#ff3d6e', '#ffb400', '#22c1c3', '#7bd236', '#ff7a00', '#b04cff', '#2f80ff', '#ff5ea8'];
+const RED = '#8e1b1b';
+const INDIGO = '#2a2f72';
+const GOLD = '#d4a017';
+const WHITE = '#efe6d2';
+const BLACK = '#15151a';
+const WOOD = '#4a2a14';
+/** Deep red, indigo, gold, off-white and black: also the caught-burst confetti colours. */
+export const MASQUERADE_COLORS = [RED, INDIGO, GOLD, WHITE, BLACK];
 
-const HEM_Y = 0.18; // world height of the hem; the body pivot sits here
-const CONE_H = 1.3;
-const R_BOTTOM = 0.7;
-const R_TOP = 0.22;
-const radiusAt = (y: number) => R_BOTTOM + (R_TOP - R_BOTTOM) * (y / CONE_H);
-const SLOPE = Math.atan((R_BOTTOM - R_TOP) / CONE_H);
+// --- layout (body-local metres; the body pivot sits on the ground) --------------
 
-function stripGeo(len: number, width: number, taperEnd: number) {
-  const g = new THREE.BoxGeometry(width, len, 0.012).translate(0, -len / 2, 0);
-  const pos = g.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const f = Math.min(1, Math.max(0, -pos.getY(i) / len));
-    pos.setX(i, pos.getX(i) * (1 + (taperEnd - 1) * f));
-  }
-  g.computeVertexNormals();
-  return g;
+const HEAD_Y = 1.72; // neck joint
+const SHOULDER_Y = 1.5;
+const SHOULDER_X = 0.36;
+const HOOD_Y = 0.18; // hood centre above the neck joint
+
+interface Tier {
+  n: number;
+  r0: number; // radius of the ring the panels hang from, at the crown
+  R: number; // radius they reach at the ground
+  y: number; // crown ring height
+  base: string[]; // panel colours, repeated around the ring
+  hem: string; // colour of the bottom band
+  decor: boolean; // cowries and sequins
+  clearance: number; // gap between the hem and the ground; inner tiers stop a little higher so the layers show
 }
+// inner tier closest to the body, outer tier on top of the others
+const TIERS: Tier[] = [
+  { n: 12, r0: 0.26, R: 0.42, y: 1.74, base: [INDIGO, WHITE], hem: GOLD, decor: false, clearance: 0.2 },
+  { n: 16, r0: 0.29, R: 0.66, y: 1.72, base: [RED, BLACK], hem: WHITE, decor: false, clearance: 0.11 },
+  { n: 22, r0: 0.32, R: 0.95, y: 1.7, base: [RED, INDIGO, RED, BLACK], hem: GOLD, decor: true, clearance: 0.03 },
+];
+const SEG_FRACTIONS = [0.3, 0.3, 0.28, 0.12]; // upper segments, then a hem band
+const SEGS = SEG_FRACTIONS.length;
+const THICKNESS = 0.022;
 
-interface Seg {
-  pivot: THREE.Object3D; // transform-only (not in the scene); rendered through the instanced meshes
-  ax: number;
-  az: number;
-  vx: number;
-  vz: number;
-}
-interface Strip {
-  theta: number;
-  phase: number;
+interface Panel {
   anchor: THREE.Matrix4;
-  width: number;
-  segs: [Seg, Seg];
+  slope: number;
+  tier: number;
+  base: number; // first instance index
+  lens: number[]; // segment lengths
+  top: number[]; // top width of each segment
+  bottom: number[]; // bottom width of each segment
+  ax: number[];
+  az: number[];
+  vx: number[];
+  vz: number[];
+  phase: number;
+  out: [number, number]; // unit vector pointing out of the body (x, z)
+}
+interface Decor {
+  panel: number;
+  seg: number;
+  x: number; // -0.5..0.5 across the segment width
+  y: number; // 0..1 down the segment
+  size: [number, number, number];
 }
 
 export interface Masquerade {
   readonly group: THREE.Group;
   readonly animator: Animator<MasqueradeState>;
   play(state: MasqueradeState, blendTime?: number): void;
-  /** Call every frame. Strips react to how the group moves and turns, so move `group` and they trail. */
+  /** Call every frame. Panels swing with weight as `group` moves and flare out when it spins. */
   update(dt: number): void;
   dispose(): void;
 }
@@ -175,181 +201,237 @@ export function createMasquerade(): Masquerade {
     return o;
   };
 
-  const body = joint('body', rig, 0, HEM_Y, 0);
-  const head = joint('head', body, 0, CONE_H + 0.04, 0);
-  const shoulderL = joint('shoulderL', body, -0.27, 1.16);
-  const shoulderR = joint('shoulderR', body, 0.27, 1.16);
-  const elbowL = joint('elbowL', shoulderL, 0, -0.36);
-  const elbowR = joint('elbowR', shoulderR, 0, -0.36);
-  const footL = joint('footL', rig, -0.18, 0.07, 0.04);
-  const footR = joint('footR', rig, 0.18, 0.07, 0.04);
+  const body = joint('body', rig, 0, 0, 0);
+  const head = joint('head', body, 0, HEAD_Y, 0);
+  const shoulderL = joint('shoulderL', body, -SHOULDER_X, SHOULDER_Y);
+  const shoulderR = joint('shoulderR', body, SHOULDER_X, SHOULDER_Y);
+  const elbowL = joint('elbowL', shoulderL, 0, -0.42);
+  const elbowR = joint('elbowR', shoulderR, 0, -0.42);
+  const footL = joint('footL', rig, -0.16, 0.07, 0.04);
+  const footR = joint('footR', rig, 0.16, 0.07, 0.04);
 
-  // cone cloth
-  const cloth = mat('#3b2a7a', { side: THREE.DoubleSide });
-  body.add(mesh(facet(new THREE.CylinderGeometry(R_TOP, R_BOTTOM, CONE_H, 10, 1, true)), cloth, 0, CONE_H / 2, 0));
-  body.add(mesh(facet(new THREE.CylinderGeometry(R_TOP + 0.02, R_TOP + 0.05, 0.08, 10)), mat('#ffd23f'), 0, CONE_H, 0));
+  // dark cloth core so the gaps between panels never show daylight
+  const core = mat('#14122a', { side: THREE.DoubleSide });
+  body.add(mesh(facet(new THREE.CylinderGeometry(0.2, 0.5, 2.0, 12, 1, true)), core, 0, 1.0, 0));
 
-  // shoes
-  const shoe = mat('#ffd23f');
-  for (const f of [footL, footR]) f.add(mesh(facet(new THREE.SphereGeometry(0.1, 6, 5)), shoe)).scale.set(1, 0.7, 1.7);
+  // shoes (hidden under the panels, but they step)
+  const black = mat(BLACK);
+  for (const f of [footL, footR]) f.add(mesh(facet(new THREE.SphereGeometry(0.09, 6, 5)), black)).scale.set(1, 0.7, 1.6);
 
-  // sleeves and mittens
-  const sleeve = mat('#ff8a00');
-  const cream = mat('#fff1d0');
+  // sleeves: deep red with a gold cuff and a black cloth mitt, so no skin shows
+  const sleeve = mat(RED);
+  const gold = mat(GOLD);
+  const wood = mat(WOOD);
   for (const [sh, el] of [[shoulderL, elbowL], [shoulderR, elbowR]] as const) {
-    sh.add(mesh(facet(new THREE.SphereGeometry(0.085, 6, 5)), sleeve));
-    sh.add(mesh(facet(new THREE.CylinderGeometry(0.075, 0.062, 0.36, 6).translate(0, -0.18, 0)), sleeve));
-    el.add(mesh(facet(new THREE.CylinderGeometry(0.062, 0.075, 0.32, 6).translate(0, -0.16, 0)), sleeve));
-    el.add(mesh(facet(new THREE.SphereGeometry(0.075, 6, 5)), cream, 0, -0.35, 0));
+    sh.add(mesh(facet(new THREE.SphereGeometry(0.09, 6, 5)), sleeve));
+    sh.add(mesh(facet(new THREE.CylinderGeometry(0.085, 0.07, 0.42, 6).translate(0, -0.21, 0)), sleeve));
+    el.add(mesh(facet(new THREE.CylinderGeometry(0.07, 0.095, 0.36, 6).translate(0, -0.18, 0)), sleeve));
+    el.add(mesh(facet(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 8)), gold, 0, -0.34, 0));
+    el.add(mesh(facet(new THREE.SphereGeometry(0.075, 6, 5)), black, 0, -0.4, 0));
   }
 
-  // carved mask
-  const wood = mat('#b5733a');
-  const darkWood = mat('#7a4520');
-  const black = mat('#1a1010');
-  const maskCenterY = 0.24;
-  const mask = mesh(facet(new THREE.SphereGeometry(0.21, 10, 8)), wood, 0, maskCenterY, 0.02);
-  mask.scale.set(0.95, 1.28, 0.88);
-  head.add(mask);
-  head.add(mesh(facet(new THREE.CylinderGeometry(0.1, 0.13, 0.1, 6)), darkWood, 0, 0.0, 0)); // neck ruff
-  for (const sx of [-1, 1]) {
-    const brow = mesh(new THREE.BoxGeometry(0.13, 0.03, 0.05), darkWood, sx * 0.095, maskCenterY + 0.1, 0.17);
-    brow.rotation.z = sx * -0.28;
-    head.add(brow);
-    const eye = mesh(facet(new THREE.SphereGeometry(0.05, 6, 5)), black, sx * 0.095, maskCenterY + 0.04, 0.17);
-    eye.scale.set(1, 0.55, 0.4);
-    head.add(eye);
-    const glint = mesh(new THREE.SphereGeometry(0.01, 4, 3), cream, sx * 0.105, maskCenterY + 0.05, 0.19);
-    head.add(glint);
-    const cheek = mesh(facet(new THREE.SphereGeometry(0.05, 6, 4)), mat('#ff6b8b'), sx * 0.14, maskCenterY - 0.07, 0.14);
-    cheek.scale.set(1, 0.8, 0.35);
-    head.add(cheek);
+  // head: hood of cloth, a dark net panel, a carved wooden crest
+  const hoodMat = mat(RED);
+  const hood = mesh(facet(new THREE.SphereGeometry(0.22, 12, 9)), hoodMat, 0, HOOD_Y, 0);
+  hood.scale.set(1, 1.2, 1.1);
+  head.add(hood);
+  head.add(mesh(facet(new THREE.CylinderGeometry(0.15, 0.19, 0.08, 10)), gold, 0, 0.0, 0)); // collar
+  head.add(mesh(facet(new THREE.TorusGeometry(0.2, 0.022, 5, 14)).rotateX(Math.PI / 2), gold, 0, HOOD_Y + 0.13, 0)); // brow band
+
+  // net panel: a dark curved patch with a lighter grid, where a face would be
+  const netY = HOOD_Y - 0.02;
+  const netR = 0.245;
+  const netLine = mat('#4a4a58');
+  const panelArc = 1.05;
+  const net = mesh(facet(new THREE.CylinderGeometry(netR, netR, 0.2, 12, 1, true, -panelArc / 2, panelArc)), mat('#0b0b10', { side: THREE.DoubleSide }), 0, netY, 0);
+  net.scale.z = 1.1;
+  head.add(net);
+  const lineR = netR + 0.004;
+  for (let i = 0; i <= 8; i++) {
+    const a = -panelArc / 2 + (panelArc * i) / 8;
+    const v = mesh(new THREE.BoxGeometry(0.006, 0.2, 0.006), netLine, Math.sin(a) * lineR, netY, Math.cos(a) * lineR * 1.1);
+    v.rotation.y = a;
+    head.add(v);
   }
-  const nose = mesh(facet(new THREE.ConeGeometry(0.04, 0.12, 4)), darkWood, 0, maskCenterY - 0.02, 0.2);
-  nose.rotation.x = Math.PI / 2;
-  head.add(nose);
-  const smile = mesh(facet(new THREE.TorusGeometry(0.09, 0.016, 4, 9, Math.PI)), mat('#8c1d2f'), 0, maskCenterY - 0.1, 0.16);
-  smile.rotation.z = Math.PI;
-  head.add(smile);
-  [['#ffd23f', 0.38], ['#2ec4b6', 0.32], ['#ff3d6e', 0.26]].forEach(([c, y], i) => {
-    const mark = mesh(facet(new THREE.ConeGeometry(0.03 - i * 0.004, 0.06, 3)), mat(c as string), 0, maskCenterY + (y as number) - 0.2, 0.17);
-    mark.rotation.z = Math.PI;
-    head.add(mark);
+  for (let j = 0; j <= 4; j++) {
+    const y = netY - 0.1 + 0.05 * j;
+    for (let i = 0; i < 8; i++) {
+      const a0 = -panelArc / 2 + (panelArc * i) / 8;
+      const a1 = -panelArc / 2 + (panelArc * (i + 1)) / 8;
+      const mid = (a0 + a1) / 2;
+      const chord = 2 * lineR * Math.sin((a1 - a0) / 2);
+      const h = mesh(new THREE.BoxGeometry(chord, 0.006, 0.006), netLine, Math.sin(mid) * lineR, y, Math.cos(mid) * lineR * 1.1);
+      h.rotation.y = mid;
+      head.add(h);
+    }
+  }
+
+  // carved crest: tapered pillar, gold rings, a carved standing disc with a gold rim, and a small spike
+  const crestBase = HOOD_Y + 0.24;
+  head.add(mesh(facet(new THREE.CylinderGeometry(0.045, 0.07, 0.16, 6)), wood, 0, crestBase + 0.07, 0));
+  for (const dy of [0.0, 0.07, 0.14]) head.add(mesh(facet(new THREE.TorusGeometry(0.062 - dy * 0.15, 0.011, 4, 10)).rotateX(Math.PI / 2), gold, 0, crestBase + dy, 0));
+  const disc = mesh(facet(new THREE.CylinderGeometry(0.12, 0.12, 0.035, 12)), wood, 0, crestBase + 0.27, 0);
+  disc.rotation.x = Math.PI / 2;
+  head.add(disc);
+  head.add(mesh(facet(new THREE.TorusGeometry(0.12, 0.012, 4, 14)), gold, 0, crestBase + 0.27, 0.022));
+  head.add(mesh(facet(new THREE.TorusGeometry(0.07, 0.01, 4, 12)), gold, 0, crestBase + 0.27, 0.022));
+  head.add(mesh(facet(new THREE.SphereGeometry(0.03, 6, 4)), mat(RED), 0, crestBase + 0.27, 0.03));
+  head.add(mesh(facet(new THREE.ConeGeometry(0.032, 0.1, 5)), gold, 0, crestBase + 0.45, 0));
+
+  // --- hanging panels: one instanced mesh for every segment, one more for the cowrie / sequin details -------------
+  const panels: Panel[] = [];
+  const decors: Decor[] = [];
+  const segColors: string[] = [];
+  let instance = 0;
+  TIERS.forEach((tier, ti) => {
+    const H = tier.y - tier.clearance;
+    const slope = Math.atan((tier.R - tier.r0) / H);
+    const length = Math.hypot(H, tier.R - tier.r0);
+    const topW = ((TAU * tier.r0) / tier.n) * 0.95;
+    const botW = ((TAU * tier.R) / tier.n) * 1.22; // overlap so no daylight shows between panels
+    for (let i = 0; i < tier.n; i++) {
+      const theta = ((i + (ti % 2) * 0.5) / tier.n) * TAU;
+      const anchor = new THREE.Matrix4()
+        .makeRotationY(theta)
+        .setPosition(Math.sin(theta) * tier.r0, tier.y, Math.cos(theta) * tier.r0);
+      let d = 0;
+      const lens: number[] = [];
+      const top: number[] = [];
+      const bottom: number[] = [];
+      SEG_FRACTIONS.forEach((f) => {
+        const len = length * f;
+        lens.push(len);
+        top.push(topW + (botW - topW) * (d / length));
+        d += len;
+        bottom.push(topW + (botW - topW) * (d / length));
+      });
+      const panel: Panel = {
+        anchor,
+        slope,
+        tier: ti,
+        base: instance,
+        lens,
+        top,
+        bottom,
+        ax: [-slope, 0, 0, 0],
+        az: [0, 0, 0, 0],
+        vx: [0, 0, 0, 0],
+        vz: [0, 0, 0, 0],
+        phase: Math.random() * TAU,
+        out: [Math.sin(theta), Math.cos(theta)],
+      };
+      const color = tier.base[i % tier.base.length];
+      for (let k = 0; k < SEGS; k++) segColors.push(k === SEGS - 1 ? tier.hem : color);
+      instance += SEGS;
+      const pi = panels.length;
+      panels.push(panel);
+      if (tier.decor) {
+        decors.push(
+          { panel: pi, seg: 0, x: -0.2, y: 0.3, size: [0.04, 0.055, 0.02] }, // cowrie
+          { panel: pi, seg: 0, x: 0.2, y: 0.62, size: [0.04, 0.055, 0.02] },
+          { panel: pi, seg: 1, x: -0.12, y: 0.45, size: [0.04, 0.055, 0.02] },
+          { panel: pi, seg: 1, x: 0.22, y: 0.8, size: [0.04, 0.055, 0.02] },
+          { panel: pi, seg: 0, x: 0.0, y: 0.1, size: [0.026, 0.026, 0.008] }, // gold sequin
+          { panel: pi, seg: 1, x: 0.05, y: 0.15, size: [0.026, 0.026, 0.008] },
+        );
+      }
+    }
   });
-  // feather crest
-  for (let i = 0; i < 5; i++) {
-    const a = (i - 2) * 0.42;
-    const f = mesh(facet(new THREE.ConeGeometry(0.06, 0.42, 4).translate(0, 0.21, 0)), mat(MASQUERADE_COLORS[(i * 3) % MASQUERADE_COLORS.length]), 0, maskCenterY + 0.24, -0.02);
-    f.scale.z = 0.35;
-    f.rotation.z = -a;
-    f.rotation.x = -0.15;
-    head.add(f);
-  }
+  const segCount = instance;
 
-  // strips: five staggered rings, two hinged segments each. The hinges are plain Object3Ds used for
-  // their matrices; all 60 upper segments are one InstancedMesh and all 60 lower segments another.
-  const strips: Strip[] = [];
-  const rings = [
-    { y: 1.2, n: 8 },
-    { y: 0.95, n: 10 },
-    { y: 0.7, n: 12 },
-    { y: 0.45, n: 14 },
-    { y: 0.2, n: 16 },
-  ];
-  const segLen = 0.3;
-  const total = rings.reduce((a, r) => a + r.n, 0);
-  const stripMat = mat('#ffffff'); // tinted per instance
-  const upperGeo = stripGeo(segLen, 1, 0.95);
-  const lowerGeo = stripGeo(segLen, 1, 0.25);
-  const upper = new THREE.InstancedMesh(upperGeo, stripMat, total);
-  const lower = new THREE.InstancedMesh(lowerGeo, stripMat, total);
-  for (const im of [upper, lower]) {
+  // Box centred on x, hanging down from y = 0, with the top width set per instance (aTaper) so adjacent segments join up.
+  const panelGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, -0.5, 0);
+  const panelMat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: toonGradient() });
+  owned.push(panelMat);
+  const taper = new Float32Array(segCount);
+  panels.forEach((p) => {
+    for (let k = 0; k < SEGS; k++) taper[p.base + k] = p.top[k] / p.bottom[k];
+  });
+  panelGeo.setAttribute('aTaper', new THREE.InstancedBufferAttribute(taper, 1));
+  panelMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aTaper;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.x *= mix(aTaper, 1.0, clamp(-position.y, 0.0, 1.0));');
+  };
+  panelMat.customProgramCacheKey = () => 'egungun-panel-taper';
+  const panelMesh = new THREE.InstancedMesh(panelGeo, panelMat, segCount);
+  const tint = new THREE.Color();
+  segColors.forEach((c, i) => panelMesh.setColorAt(i, tint.set(c)));
+  const decorGeo = facet(new THREE.SphereGeometry(1, 6, 4));
+  const decorMesh = new THREE.InstancedMesh(decorGeo, mat('#ffffff'), Math.max(1, decors.length));
+  decors.forEach((d, i) => decorMesh.setColorAt(i, tint.set(d.size[2] > 0.01 ? WHITE : GOLD)));
+  for (const im of [panelMesh, decorMesh]) {
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.frustumCulled = false;
     body.add(im);
   }
-  const tint = new THREE.Color();
-  let idx = 0;
-  rings.forEach((ring, ri) => {
-    const width = 0.2 - ri * 0.012;
-    for (let i = 0; i < ring.n; i++) {
-      const theta = ((i + (ri % 2) * 0.5) / ring.n) * TAU;
-      const r = radiusAt(ring.y) + 0.018 + ri * 0.004;
-      const anchor = new THREE.Object3D();
-      anchor.position.set(Math.sin(theta) * r, ring.y, Math.cos(theta) * r);
-      anchor.rotation.y = theta; // local +z points outward
-      anchor.updateMatrix();
-      upper.setColorAt(idx, tint.set(MASQUERADE_COLORS[(i + ri * 3) % MASQUERADE_COLORS.length]));
-      lower.setColorAt(idx, tint.set(MASQUERADE_COLORS[(i + ri * 3 + 3) % MASQUERADE_COLORS.length]));
-      idx++;
-      const p1 = new THREE.Object3D();
-      const p2 = new THREE.Object3D();
-      p2.position.y = -segLen;
-      p2.updateMatrix();
-      strips.push({
-        theta,
-        phase: Math.random() * TAU,
-        anchor: anchor.matrix.clone(),
-        width,
-        segs: [
-          { pivot: p1, ax: -SLOPE, az: 0, vx: 0, vz: 0 },
-          { pivot: p2, ax: 0, az: 0, vx: 0, vz: 0 },
-        ],
-      });
-    }
-  });
-  const m1 = new THREE.Matrix4();
-  const m2 = new THREE.Matrix4();
-  const out = new THREE.Matrix4();
-  const scaleM = new THREE.Matrix4();
-  const lift = new THREE.Matrix4().makeTranslation(0, 0, 0.004); // keeps the lower segment off the upper one's face
-  function writeStrips() {
-    strips.forEach((s, i) => {
-      const [a, b] = s.segs;
-      a.pivot.rotation.set(a.ax, 0, a.az);
-      a.pivot.updateMatrix();
-      b.pivot.rotation.set(b.ax, 0, b.az);
-      b.pivot.updateMatrix();
-      m1.copy(s.anchor).multiply(a.pivot.matrix);
-      upper.setMatrixAt(i, out.copy(m1).multiply(scaleM.makeScale(s.width, 1, 1)));
-      m2.copy(m1).multiply(b.pivot.matrix).multiply(lift);
-      lower.setMatrixAt(i, out.copy(m2).multiply(scaleM.makeScale(s.width * 0.95, 1, 1)));
-    });
-    upper.instanceMatrix.needsUpdate = true;
-    lower.instanceMatrix.needsUpdate = true;
-  }
 
-  // Merge the static parts (cone cloth, sleeves, shoes, mask, crest) into two skinned meshes; strips are already instanced.
+  const chain: THREE.Matrix4[] = Array.from({ length: SEGS }, () => new THREE.Matrix4());
+  const m = new THREE.Matrix4();
+  const out = new THREE.Matrix4();
+  const euler = new THREE.Euler();
+  function writePanels() {
+    for (const p of panels) {
+      m.copy(p.anchor);
+      for (let k = 0; k < SEGS; k++) {
+        out.makeRotationFromEuler(euler.set(p.ax[k], 0, p.az[k]));
+        if (k > 0) out.setPosition(0, -p.lens[k - 1], 0);
+        m.multiply(out);
+        chain[k].copy(m);
+        panelMesh.setMatrixAt(p.base + k, out.copy(m).multiply(scratch.makeScale(p.bottom[k], p.lens[k], THICKNESS)));
+      }
+    }
+    decors.forEach((d, i) => {
+      const p = panels[d.panel];
+      const w = (p.top[d.seg] + p.bottom[d.seg]) / 2;
+      out.copy(chain[d.seg]).multiply(scratch.makeTranslation(d.x * w, -d.y * p.lens[d.seg], THICKNESS / 2 + d.size[2] * 0.6));
+      decorMesh.setMatrixAt(i, out.multiply(scratch.makeScale(d.size[0], d.size[1], d.size[2])));
+    });
+    panelMesh.instanceMatrix.needsUpdate = true;
+    decorMesh.instanceMatrix.needsUpdate = true;
+  }
+  const scratch = new THREE.Matrix4();
+
+  // Merge the static parts (core, sleeves, hood, net, crest) into two skinned meshes.
   const partsMat = toon('#ffffff', { vertexColors: true });
   owned.push(partsMat);
-  const clothParts: THREE.Mesh[] = [];
+  const coreParts: THREE.Mesh[] = [];
   const otherParts: THREE.Mesh[] = [];
   rig.traverse((o) => {
     if (!(o instanceof THREE.Mesh) || (o as THREE.InstancedMesh).isInstancedMesh) return;
-    (o.material === cloth ? clothParts : otherParts).push(o);
+    (o.material === core ? coreParts : otherParts).push(o);
   });
   const baked = bakeSkinned(rig, bones, [
-    { meshes: clothParts, material: cloth, vertexColors: false },
+    { meshes: coreParts, material: core, vertexColors: false },
     { meshes: otherParts, material: partsMat, vertexColors: true },
   ]);
 
   const animator = new Animator<MasqueradeState>(J, CLIPS, 'search_walk', 0.25);
-  writeStrips();
+  writePanels();
 
   // movement tracking for the cloth
   const prevPos = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   const quat = new THREE.Quaternion();
-  const vel = new THREE.Vector3(); // local-frame velocity, smoothed
+  const vel = new THREE.Vector3(); // crown velocity in the body frame, smoothed
+  const prevVel = new THREE.Vector3();
+  const acc = new THREE.Vector3();
   let prevYaw = 0;
   let yawRate = 0;
   let clock = 0;
   let primed = false;
+  const crown = new THREE.Vector3(0, 1.72, 0);
 
-  const yawOf = () => {
-    const e = new THREE.Euler().setFromQuaternion(rig.getWorldQuaternion(quat), 'YXZ');
-    return e.y;
-  };
+  const yawOf = () => new THREE.Euler().setFromQuaternion(rig.getWorldQuaternion(quat), 'YXZ').y;
+
+  // heavy cloth: soft, fairly damped springs; every segment lags a little more than the one above
+  const K = 40;
+  const D = 6.2;
+  const DRAG = [0.05, 0.07, 0.09, 0.11]; // swing per m/s of crown velocity
+  const INERTIA = [0.006, 0.01, 0.014, 0.018]; // swing per m/s^2 of crown acceleration (the weighty part)
+  const FLARE = [0.5, 1, 1, 1];
+  const LIMIT = 0.5;
+  const clamp = (a: number) => Math.max(-LIMIT, Math.min(LIMIT, a));
 
   function update(dt: number) {
     animator.update(dt);
@@ -357,7 +439,7 @@ export function createMasquerade(): Masquerade {
     if (dt <= 0) return;
     clock += dt;
 
-    group.getWorldPosition(tmp);
+    body.localToWorld(tmp.copy(crown));
     const yaw = yawOf();
     if (!primed) {
       prevPos.copy(tmp);
@@ -371,32 +453,33 @@ export function createMasquerade(): Masquerade {
     prevYaw = yaw;
     yawRate += (dyaw / dt - yawRate) * 0.25;
 
-    // into the (un-spun) body frame
     group.getWorldQuaternion(quat).invert();
     world.applyQuaternion(quat);
+    prevVel.copy(vel);
     vel.lerp(world, 0.3);
+    acc.copy(vel).sub(prevVel).divideScalar(dt);
+    const accLimit = 30;
+    acc.clampLength(0, accLimit);
 
-    const K = 70;
-    const D = 6;
-    const spin = Math.min(0.9, Math.abs(yawRate) * 0.07);
-    for (const s of strips) {
-      const ox = Math.sin(s.theta);
-      const oz = Math.cos(s.theta);
+    const flare = Math.min(0.5, Math.abs(yawRate) * 0.11);
+    for (const p of panels) {
+      const [ox, oz] = p.out;
       const outward = vel.x * ox + vel.z * oz;
       const tangent = vel.x * oz - vel.z * ox;
-      s.segs.forEach((seg, k) => {
-        const gain = k === 0 ? 0.2 : 0.34;
-        const sway = Math.sin(clock * 2.3 + s.phase + k * 0.9) * (0.05 + 0.04 * k);
-        const base = k === 0 ? -SLOPE : 0;
-        const tx = clampAngle(base + gain * outward - spin * (k + 1) * 0.6 + sway);
-        const tz = clampAngle(gain * tangent + Math.cos(clock * 1.9 + s.phase) * 0.03 * (k + 1));
-        seg.vx += ((tx - seg.ax) * K - seg.vx * D) * dt;
-        seg.vz += ((tz - seg.az) * K - seg.vz * D) * dt;
-        seg.ax += seg.vx * dt;
-        seg.az += seg.vz * dt;
-      });
+      const outAcc = acc.x * ox + acc.z * oz;
+      const tanAcc = acc.x * oz - acc.z * ox;
+      for (let k = 0; k < SEGS; k++) {
+        const sway = Math.sin(clock * 1.7 + p.phase + k * 0.7) * (0.012 + 0.012 * k);
+        const base = k === 0 ? -p.slope : 0;
+        const tx = clamp(base + DRAG[k] * outward + INERTIA[k] * outAcc - flare * FLARE[k] + sway);
+        const tz = clamp(DRAG[k] * tangent + INERTIA[k] * tanAcc + Math.cos(clock * 1.3 + p.phase) * 0.008 * (k + 1));
+        p.vx[k] += ((tx - p.ax[k]) * K - p.vx[k] * D) * dt;
+        p.vz[k] += ((tz - p.az[k]) * K - p.vz[k] * D) * dt;
+        p.ax[k] += p.vx[k] * dt;
+        p.az[k] += p.vz[k] * dt;
+      }
     }
-    writeStrips();
+    writePanels();
   }
 
   return {
@@ -405,15 +488,14 @@ export function createMasquerade(): Masquerade {
     play: (state, blendTime) => animator.play(state, blendTime),
     update,
     dispose() {
-      baked.forEach((m) => m.geometry.dispose());
-      upperGeo.dispose();
-      lowerGeo.dispose();
-      upper.dispose();
-      lower.dispose();
-      owned.forEach((m) => m.dispose());
+      baked.forEach((b) => b.geometry.dispose());
+      panelGeo.dispose();
+      decorGeo.dispose();
+      panelMesh.dispose();
+      decorMesh.dispose();
+      owned.forEach((mt) => mt.dispose());
     },
   };
 }
 
-const clampAngle = (a: number) => Math.max(-1.1, Math.min(1.1, a));
 export type { Pose };
