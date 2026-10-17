@@ -40,6 +40,18 @@ export interface Voice {
   /** Resolves when the clip finishes or is stopped. */
   readonly ended: Promise<void>;
   stop(fade?: number): void;
+  /** Move a spatial voice. No-op for voices started without `spatial`. */
+  setPosition(x: number, y: number, z: number): void;
+}
+
+export interface SpatialOptions {
+  position: { x: number; y: number; z: number };
+  /** Distance (m) at which the clip is at full level. Default 2. */
+  refDistance?: number;
+  /** Distance (m) beyond which it stops getting quieter. Default 30. */
+  maxDistance?: number;
+  /** How fast it fades with distance. Default 1.5. */
+  rolloff?: number;
 }
 
 export interface DistantOptions {
@@ -93,6 +105,8 @@ interface PlayOptions {
   loop?: boolean;
   volume?: number;
   fadeIn?: number;
+  /** Place the clip in the world; it pans and fades relative to `setListener`. */
+  spatial?: SpatialOptions;
 }
 
 export type ChantPhase = 'idle' | 'intro' | 'asking' | 'open' | 'hunt';
@@ -176,6 +190,16 @@ async function synthPlaceholder(name: ClipName): Promise<AudioBuffer> {
   return oc.startRendering();
 }
 
+function setPannerPosition(p: PannerNode, x: number, y: number, z: number): void {
+  if (p.positionX) {
+    p.positionX.value = x;
+    p.positionY.value = y;
+    p.positionZ.value = z;
+  } else {
+    p.setPosition(x, y, z);
+  }
+}
+
 // --- manager -----------------------------------------------------------------
 
 class AudioManager {
@@ -253,6 +277,27 @@ class AudioManager {
     if (this.ctx) this.channelGain[channel].gain.setTargetAtTime(this.volumes[channel], this.ctx.currentTime, 0.03);
   }
 
+  /** Where the listener stands and faces (world metres). Call every frame while spatial voices play. */
+  setListener(x: number, y: number, z: number, fx = 0, fy = 0, fz = -1): void {
+    if (!this.ctx) return;
+    const l = this.ctx.listener;
+    const t = this.ctx.currentTime;
+    if (l.positionX) {
+      l.positionX.setTargetAtTime(x, t, 0.03);
+      l.positionY.setTargetAtTime(y, t, 0.03);
+      l.positionZ.setTargetAtTime(z, t, 0.03);
+      l.forwardX.value = fx;
+      l.forwardY.value = fy;
+      l.forwardZ.value = fz;
+      l.upX.value = 0;
+      l.upY.value = 1;
+      l.upZ.value = 0;
+    } else {
+      l.setPosition(x, y, z);
+      l.setOrientation(fx, fy, fz, 0, 1, 0);
+    }
+  }
+
   // --- clips
 
   private loadBuffer(name: ClipName): Promise<AudioBuffer | null> {
@@ -313,15 +358,29 @@ class AudioManager {
     const distant = opts.distant ?? DEFAULT_DISTANT.has(name);
     let fxNodes: AudioNode[] = [];
     let tailMs = 0;
+    let panner: PannerNode | null = null;
+    let out: AudioNode = this.channelGain[channel];
+    if (opts.spatial) {
+      const sp = opts.spatial;
+      panner = ctx.createPanner();
+      panner.panningModel = 'equalpower';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = sp.refDistance ?? 2;
+      panner.maxDistance = sp.maxDistance ?? 30;
+      panner.rolloffFactor = sp.rolloff ?? 1.5;
+      setPannerPosition(panner, sp.position.x, sp.position.y, sp.position.z);
+      panner.connect(out);
+      out = panner;
+    }
     if (distant) {
       const o = distant === true ? {} : distant;
       this.impulse ??= makeImpulse(ctx, o.reverbSeconds ?? 0.6);
       const ir = o.reverbSeconds ? makeImpulse(ctx, o.reverbSeconds) : this.impulse;
-      fxNodes = connectDistant(ctx, gain, this.channelGain[channel], ir, o);
+      fxNodes = connectDistant(ctx, gain, out, ir, o);
       tailMs = ((o.reverbSeconds ?? 0.6) + 0.1) * 1000;
       src.connect(gain);
     } else {
-      src.connect(gain).connect(this.channelGain[channel]);
+      src.connect(gain).connect(out);
     }
 
     let resolveEnded!: () => void;
@@ -349,6 +408,9 @@ class AudioManager {
           }
         }
       },
+      setPosition: (x, y, z) => {
+        if (panner) setPannerPosition(panner, x, y, z);
+      },
     };
     entry.voice = voice;
     this.voices.add(entry);
@@ -359,6 +421,7 @@ class AudioManager {
       // let the reverb tail ring out before tearing the chain down
       window.setTimeout(() => {
         gain.disconnect();
+        panner?.disconnect();
         fxNodes.forEach((n) => n.disconnect());
       }, tailMs);
     };

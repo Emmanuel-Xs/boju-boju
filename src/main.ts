@@ -4,8 +4,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mountAudioDebug } from './audioDebug';
 
 
-if (new URLSearchParams(location.search).has('debug')) {
+const params = new URLSearchParams(location.search);
+if (params.has('debug')) {
   void import('./debugScene').then((m) => m.startDebugScene());
+} else if (params.get('level') === 'compound') {
+  void import('./levels/viewer').then((m) => m.startCompound());
 } else {
   mountAudioDebug();
   pipelineSmokeTest();
