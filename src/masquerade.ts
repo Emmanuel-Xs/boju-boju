@@ -1,5 +1,6 @@
-// Egungun-style masquerade seeker: a fully cloth-covered figure, a dark net panel where a face would be, a carved wooden crest,
-// and long heavy cloth panels hanging in three tiers from a yoke ring just under the head (so the net panel stays visible). Forward is +z. About 1.4x the player's height.
+// Egungun-style masquerade seeker: a fully cloth-covered figure, a dark net panel framed and veiled with cowries, a carved wooden crest with a small figure,
+// and long heavy appliqué panels (black sequin fields, zig-zag trim, fringe) hanging in three tiers from a yoke ring just under the head (so the net panel stays visible).
+// White gloves and decorated boots show below the calf-length hem. Forward is +z. About 1.5x the player's height.
 import * as THREE from 'three';
 import { toon, toonGradient, facet } from './toon';
 import { Animator, type Clip, type Pose } from './animator';
@@ -62,7 +63,7 @@ const CLIPS: Record<MasqueradeState, Clip<MasqueradeState>> = {
   },
   // Leaning in, hand at the chin, head tilted: "somebody is a suspiciously good lamp".
   suspicious_lean: (t) => ({
-    body: { rx: 0.2, rz: 0.03 + Math.sin(t * 1.3) * 0.015 },
+    body: { rx: 0.3, rz: 0.03 + Math.sin(t * 1.3) * 0.015 },
     head: { rx: 0.15, rz: 0.25, ry: Math.sin(t * 0.8) * 0.2 },
     shoulderL: { rx: -1.7, rz: 0.4 },
     elbowL: { rx: -2.1 },
@@ -71,20 +72,19 @@ const CLIPS: Record<MasqueradeState, Clip<MasqueradeState>> = {
     footL: { pz: 0.12 },
     footR: { pz: -0.06 },
   }),
-  // Gotcha: a big forward lunge, arms wide.
+  // Gotcha: a deep ceremonial bow forward with one arm reaching out to touch the hider, the other held back. Weighty, not a pounce.
   catch_lunge: (t) => {
-    const k = ease(t / 0.2);
-    const w = Math.sin(t * 18) * 0.05 * k;
+    const k = ease(t / 0.3);
     return {
-      root: { py: 0.03 * k },
-      body: { rx: 0.42 * k },
-      head: { rx: -0.25 * k },
-      shoulderL: { rx: -1.5 * k + w, rz: -0.4 * k },
-      shoulderR: { rx: -1.5 * k - w, rz: 0.4 * k },
-      elbowL: { rx: -0.25 * k },
-      elbowR: { rx: -0.25 * k },
-      footL: { pz: 0.3 * k },
-      footR: { pz: -0.22 * k },
+      root: { py: 0.01 * k },
+      body: { rx: 0.4 * k },
+      head: { rx: -0.2 * k, ry: Math.sin(t * 6) * 0.03 * k },
+      shoulderR: { rx: -1.75 * k, rz: 0.12 * k },
+      elbowR: { rx: -0.15 * k },
+      shoulderL: { rx: 0.35 * k, rz: -0.5 * k },
+      elbowL: { rx: -0.4 * k },
+      footL: { pz: 0.26 * k },
+      footR: { pz: -0.2 * k },
     };
   },
   // Spinning with arms up: the panels fly out.
@@ -112,9 +112,10 @@ const INDIGO = '#2a2f72';
 const GOLD = '#d4a017';
 const WHITE = '#efe6d2';
 const BLACK = '#15151a';
+const ROYAL = '#1f4fb0';
 const WOOD = '#4a2a14';
-/** Deep red, indigo, gold, off-white and black: also the caught-burst confetti colours. */
-export const MASQUERADE_COLORS = [RED, INDIGO, GOLD, WHITE, BLACK];
+/** Deep red, indigo, royal blue, gold, off-white and black: also the caught-burst confetti colours. */
+export const MASQUERADE_COLORS = [RED, INDIGO, GOLD, WHITE, BLACK, ROYAL];
 
 // --- layout (body-local metres; the body pivot sits on the ground) --------------
 
@@ -131,14 +132,26 @@ interface Tier {
   base: string[]; // panel colours, repeated around the ring
   hem: string; // colour of the bottom band
   decor: boolean; // cowries and sequins
-  clearance: number; // gap between the hem and the ground; inner tiers stop a little higher so the layers show
+  clearance: number; // gap between the hem and the ground; the outer tier ends at calf height so the boots show, inner tiers stop a little higher
+  fields: number[]; // segments that carry a black (or contrasting) sequin field with a diamond motif
+  bar: boolean; // gold yoke bar across the top segment
+  fringe: boolean; // gold fringe hanging below the hem
+  trim: [string, string] | null; // zig-zag diamonds along the hem band
 }
 // inner tier closest to the body, outer tier on top of the others
 const TIERS: Tier[] = [
-  { n: 12, r0: 0.26, R: 0.42, y: 1.74, base: [INDIGO, WHITE], hem: GOLD, decor: false, clearance: 0.2 },
-  { n: 16, r0: 0.29, R: 0.66, y: 1.72, base: [RED, BLACK], hem: WHITE, decor: false, clearance: 0.11 },
-  { n: 22, r0: 0.32, R: 0.95, y: 1.7, base: [RED, INDIGO, RED, BLACK], hem: GOLD, decor: true, clearance: 0.03 },
+  { n: 12, r0: 0.26, R: 0.42, y: 1.74, base: [ROYAL, WHITE], hem: GOLD, decor: false, clearance: 0.47, fields: [], bar: false, fringe: false, trim: [WHITE, ROYAL] },
+  { n: 16, r0: 0.29, R: 0.66, y: 1.72, base: [RED, BLACK], hem: WHITE, decor: false, clearance: 0.4, fields: [1], bar: false, fringe: false, trim: [ROYAL, RED] },
+  { n: 22, r0: 0.32, R: 0.95, y: 1.7, base: [RED, ROYAL, RED, INDIGO], hem: GOLD, decor: true, clearance: 0.32, fields: [1, 2], bar: true, fringe: true, trim: [ROYAL, RED] },
 ];
+// Appliqué colours per base cloth: the sequin field, then two motif colours that alternate between segments.
+const APPLIQUE: Record<string, [string, string, string]> = {
+  [RED]: [BLACK, GOLD, WHITE],
+  [ROYAL]: [BLACK, RED, GOLD],
+  [INDIGO]: [BLACK, GOLD, RED],
+  [BLACK]: [RED, GOLD, BLACK],
+  [WHITE]: [ROYAL, RED, GOLD],
+};
 const SEG_FRACTIONS = [0.3, 0.3, 0.28, 0.12]; // upper segments, then a hem band
 const SEGS = SEG_FRACTIONS.length;
 const THICKNESS = 0.022;
@@ -157,6 +170,20 @@ interface Panel {
   vz: number[];
   phase: number;
   out: [number, number]; // unit vector pointing out of the body (x, z)
+  tiles: number[]; // indices into the tile / decor lists that ride on this panel
+  decors: number[];
+}
+/** Flat appliqué piece (box) pinned to a panel segment; rot is about the panel's outward axis. */
+interface Tile {
+  panel: number;
+  seg: number;
+  x: number; // -0.5..0.5 across the segment width
+  y: number; // 0..1 down the segment (can run past 1 for fringe)
+  w: number;
+  h: number;
+  rot: number;
+  layer: number; // -1 = same plane as the panel (fringe), 0 = on the cloth, 1+ = stacked on top
+  color: string;
 }
 interface Decor {
   panel: number;
@@ -211,23 +238,36 @@ export function createMasquerade(): Masquerade {
   const footR = joint('footR', rig, 0.16, 0.07, 0.04);
 
   // dark cloth core so the gaps between panels never show daylight
+  const gold = mat(GOLD);
   const core = mat('#14122a', { side: THREE.DoubleSide });
-  body.add(mesh(facet(new THREE.CylinderGeometry(0.2, 0.5, 2.0, 12, 1, true)), core, 0, 1.0, 0));
+  body.add(mesh(facet(new THREE.CylinderGeometry(0.2, 0.455, 1.7, 12, 1, true)), core, 0, 1.15, 0));
 
-  // shoes (hidden under the panels, but they step)
+  // decorated boots, calf height: black leather with a gold top band, a red stripe and a white toe cap; they step below the hem
   const black = mat(BLACK);
-  for (const f of [footL, footR]) f.add(mesh(facet(new THREE.SphereGeometry(0.09, 6, 5)), black)).scale.set(1, 0.7, 1.6);
+  const white = mat(WHITE);
+  const red = mat(RED);
+  for (const f of [footL, footR]) {
+    f.add(mesh(facet(new THREE.CylinderGeometry(0.075, 0.088, 0.3, 7)), black, 0, 0.08, 0));
+    f.add(mesh(facet(new THREE.CylinderGeometry(0.082, 0.082, 0.04, 7)), gold, 0, 0.2, 0));
+    f.add(mesh(facet(new THREE.CylinderGeometry(0.081, 0.085, 0.025, 7)), red, 0, 0.12, 0));
+    const toe = mesh(facet(new THREE.SphereGeometry(0.09, 6, 5)), black, 0, -0.02, 0.06);
+    toe.scale.set(1, 0.6, 1.5);
+    const cap = mesh(facet(new THREE.SphereGeometry(0.055, 6, 4)), white, 0, -0.02, 0.15);
+    cap.scale.set(1, 0.7, 0.9);
+    f.add(toe, cap);
+  }
 
   // sleeves: deep red with a gold cuff and a black cloth mitt, so no skin shows
   const sleeve = mat(RED);
-  const gold = mat(GOLD);
   const wood = mat(WOOD);
   for (const [sh, el] of [[shoulderL, elbowL], [shoulderR, elbowR]] as const) {
     sh.add(mesh(facet(new THREE.SphereGeometry(0.09, 6, 5)), sleeve));
     sh.add(mesh(facet(new THREE.CylinderGeometry(0.085, 0.07, 0.42, 6).translate(0, -0.21, 0)), sleeve));
     el.add(mesh(facet(new THREE.CylinderGeometry(0.07, 0.095, 0.36, 6).translate(0, -0.18, 0)), sleeve));
     el.add(mesh(facet(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 8)), gold, 0, -0.34, 0));
-    el.add(mesh(facet(new THREE.SphereGeometry(0.075, 6, 5)), black, 0, -0.4, 0));
+    const glove = mesh(facet(new THREE.SphereGeometry(0.075, 6, 5)), white, 0, -0.41, 0); // white gloves
+    glove.scale.set(1, 1.5, 0.85);
+    el.add(glove);
   }
 
   // head: hood of cloth, a dark net panel, a carved wooden crest
@@ -266,7 +306,22 @@ export function createMasquerade(): Masquerade {
     }
   }
 
-  // carved crest: tapered pillar, gold rings, a carved standing disc with a gold rim, and a small spike
+  // cowrie veil: a brow row of cowries framing the net, and strings of cowries hanging across it
+  const cowrie = mat(WHITE);
+  const cowrieGeo = facet(new THREE.SphereGeometry(0.02, 6, 4));
+  const addCowrie = (a: number, y: number, r: number, s = 1) => {
+    const c = mesh(cowrieGeo, cowrie, Math.sin(a) * r, y, Math.cos(a) * r * 1.1);
+    c.rotation.y = a;
+    c.scale.set(0.85 * s, 1.25 * s, 0.7 * s);
+    head.add(c);
+  };
+  for (let i = 0; i < 9; i++) addCowrie(-panelArc / 2 + (panelArc * i) / 8, netY + 0.115, lineR + 0.012, 1.1);
+  for (let i = 0; i < 6; i++) {
+    const a = -panelArc / 2 + 0.08 + ((panelArc - 0.16) * i) / 5;
+    for (let j = 0; j < 4; j++) addCowrie(a, netY + 0.07 - j * 0.045, lineR + 0.016);
+  }
+
+  // carved crest: tapered pillar, gold rings, a wide flat wooden tray, a carved standing disc with a gold rim, and a small carved figure on top
   const crestBase = HOOD_Y + 0.24;
   head.add(mesh(facet(new THREE.CylinderGeometry(0.045, 0.07, 0.16, 6)), wood, 0, crestBase + 0.07, 0));
   for (const dy of [0.0, 0.07, 0.14]) head.add(mesh(facet(new THREE.TorusGeometry(0.062 - dy * 0.15, 0.011, 4, 10)).rotateX(Math.PI / 2), gold, 0, crestBase + dy, 0));
@@ -276,11 +331,22 @@ export function createMasquerade(): Masquerade {
   head.add(mesh(facet(new THREE.TorusGeometry(0.12, 0.012, 4, 14)), gold, 0, crestBase + 0.27, 0.022));
   head.add(mesh(facet(new THREE.TorusGeometry(0.07, 0.01, 4, 12)), gold, 0, crestBase + 0.27, 0.022));
   head.add(mesh(facet(new THREE.SphereGeometry(0.03, 6, 4)), mat(RED), 0, crestBase + 0.27, 0.03));
-  head.add(mesh(facet(new THREE.ConeGeometry(0.032, 0.1, 5)), gold, 0, crestBase + 0.45, 0));
+  head.add(mesh(facet(new THREE.CylinderGeometry(0.19, 0.17, 0.025, 12)), wood, 0, crestBase + 0.145, 0)); // flat headpiece tray
+  head.add(mesh(facet(new THREE.TorusGeometry(0.185, 0.012, 4, 14)).rotateX(Math.PI / 2), gold, 0, crestBase + 0.16, 0));
+  const figY = crestBase + 0.39;
+  head.add(mesh(facet(new THREE.ConeGeometry(0.04, 0.1, 6)), wood, 0, figY + 0.05, 0)); // robed body
+  head.add(mesh(facet(new THREE.SphereGeometry(0.03, 6, 5)), wood, 0, figY + 0.13, 0)); // head
+  head.add(mesh(facet(new THREE.ConeGeometry(0.03, 0.05, 5)), gold, 0, figY + 0.185, 0)); // crown
+  for (const sx of [-1, 1]) {
+    const arm = mesh(new THREE.BoxGeometry(0.075, 0.014, 0.014), wood, sx * 0.05, figY + 0.1, 0); // arms raised
+    arm.rotation.z = sx * 0.6;
+    head.add(arm);
+  }
 
   // --- hanging panels: one instanced mesh for every segment, one more for the cowrie / sequin details -------------
   const panels: Panel[] = [];
   const decors: Decor[] = [];
+  const tiles: Tile[] = [];
   const segColors: string[] = [];
   let instance = 0;
   TIERS.forEach((tier, ti) => {
@@ -319,24 +385,49 @@ export function createMasquerade(): Masquerade {
         vz: [0, 0, 0, 0],
         phase: Math.random() * TAU,
         out: [Math.sin(theta), Math.cos(theta)],
+        tiles: [],
+        decors: [],
       };
       const color = tier.base[i % tier.base.length];
       for (let k = 0; k < SEGS; k++) segColors.push(k === SEGS - 1 ? tier.hem : color);
       instance += SEGS;
       const pi = panels.length;
       panels.push(panel);
+      // appliqué: a sequin field with a nested diamond motif on each chosen segment, a gold yoke bar, zig-zag trim on the hem band, fringe below it
+      const avg = (k: number) => (top[k] + bottom[k]) / 2;
+      const [field, motif, motif2] = APPLIQUE[color];
+      if (tier.bar) tiles.push({ panel: pi, seg: 0, x: 0, y: 0.1, w: avg(0) * 0.7, h: lens[0] * 0.12, rot: 0, layer: 0, color: GOLD });
+      tier.fields.forEach((k, fi) => {
+        const w = avg(k) * 0.76;
+        const d = Math.min(w * 0.62, lens[k] * 0.3);
+        tiles.push({ panel: pi, seg: k, x: 0, y: 0.5, w, h: lens[k] * 0.84, rot: 0, layer: 0, color: field });
+        tiles.push({ panel: pi, seg: k, x: 0, y: 0.5, w: d, h: d, rot: Math.PI / 4, layer: 1, color: fi % 2 ? motif2 : motif });
+        tiles.push({ panel: pi, seg: k, x: 0, y: 0.5, w: d * 0.45, h: d * 0.45, rot: Math.PI / 4, layer: 2, color: field });
+      });
+      const hk = SEGS - 1;
+      if (tier.trim) {
+        const n = 5;
+        const d = avg(hk) / n / Math.SQRT2;
+        for (let j = 0; j < n; j++) tiles.push({ panel: pi, seg: hk, x: (j + 0.5) / n - 0.5, y: 0.5, w: d, h: d, rot: Math.PI / 4, layer: 0, color: tier.trim[j % 2] });
+      }
+      if (tier.fringe) {
+        const n = 6;
+        const fh = 0.075;
+        for (let j = 0; j < n; j++) tiles.push({ panel: pi, seg: hk, x: (j + 0.5) / n - 0.5, y: 1 + (fh / 2 - 0.01) / lens[hk], w: (avg(hk) / n) * 0.4, h: fh, rot: 0, layer: -1, color: tier.hem });
+      }
       if (tier.decor) {
+        const cow: [number, number, number] = [0.04, 0.055, 0.02];
+        const seq: [number, number, number] = [0.026, 0.026, 0.008];
         decors.push(
-          { panel: pi, seg: 0, x: -0.2, y: 0.3, size: [0.04, 0.055, 0.02] }, // cowrie
-          { panel: pi, seg: 0, x: 0.2, y: 0.62, size: [0.04, 0.055, 0.02] },
-          { panel: pi, seg: 1, x: -0.12, y: 0.45, size: [0.04, 0.055, 0.02] },
-          { panel: pi, seg: 1, x: 0.22, y: 0.8, size: [0.04, 0.055, 0.02] },
-          { panel: pi, seg: 0, x: 0.0, y: 0.1, size: [0.026, 0.026, 0.008] }, // gold sequin
-          { panel: pi, seg: 1, x: 0.05, y: 0.15, size: [0.026, 0.026, 0.008] },
+          { panel: pi, seg: 0, x: -0.2, y: 0.45, size: cow }, // cowries on the plain cloth above the fields
+          { panel: pi, seg: 0, x: 0.2, y: 0.75, size: cow },
         );
+        for (const k of tier.fields) for (const sx of [-0.3, 0.3]) for (const sy of [0.12, 0.88]) decors.push({ panel: pi, seg: k, x: sx, y: sy, size: seq }); // gold sequins at the field corners
       }
     }
   });
+  tiles.forEach((t, i) => panels[t.panel].tiles.push(i));
+  decors.forEach((d, i) => panels[d.panel].decors.push(i));
   const segCount = instance;
 
   // Box centred on x, hanging down from y = 0, with the top width set per instance (aTaper) so adjacent segments join up.
@@ -357,10 +448,13 @@ export function createMasquerade(): Masquerade {
   const panelMesh = new THREE.InstancedMesh(panelGeo, panelMat, segCount);
   const tint = new THREE.Color();
   segColors.forEach((c, i) => panelMesh.setColorAt(i, tint.set(c)));
+  const tileGeo = new THREE.BoxGeometry(1, 1, 1);
+  const tileMesh = new THREE.InstancedMesh(tileGeo, mat('#ffffff'), Math.max(1, tiles.length));
+  tiles.forEach((t, i) => tileMesh.setColorAt(i, tint.set(t.color)));
   const decorGeo = facet(new THREE.SphereGeometry(1, 6, 4));
   const decorMesh = new THREE.InstancedMesh(decorGeo, mat('#ffffff'), Math.max(1, decors.length));
   decors.forEach((d, i) => decorMesh.setColorAt(i, tint.set(d.size[2] > 0.01 ? WHITE : GOLD)));
-  for (const im of [panelMesh, decorMesh]) {
+  for (const im of [panelMesh, tileMesh, decorMesh]) {
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.frustumCulled = false;
     body.add(im);
@@ -380,17 +474,27 @@ export function createMasquerade(): Masquerade {
         chain[k].copy(m);
         panelMesh.setMatrixAt(p.base + k, out.copy(m).multiply(scratch.makeScale(p.bottom[k], p.lens[k], THICKNESS)));
       }
+      for (const i of p.tiles) {
+        const t = tiles[i];
+        const w = (p.top[t.seg] + p.bottom[t.seg]) / 2;
+        const z = t.layer < 0 ? 0 : THICKNESS / 2 + 0.003 + t.layer * 0.004;
+        out.copy(chain[t.seg]).multiply(scratch.makeTranslation(t.x * w, -t.y * p.lens[t.seg], z));
+        out.multiply(tileRot.makeRotationZ(t.rot));
+        tileMesh.setMatrixAt(i, out.multiply(scratch.makeScale(t.w, t.h, t.layer < 0 ? THICKNESS : 0.006)));
+      }
+      for (const i of p.decors) {
+        const d = decors[i];
+        const w = (p.top[d.seg] + p.bottom[d.seg]) / 2;
+        out.copy(chain[d.seg]).multiply(scratch.makeTranslation(d.x * w, -d.y * p.lens[d.seg], THICKNESS / 2 + 0.012 + d.size[2] * 0.5));
+        decorMesh.setMatrixAt(i, out.multiply(scratch.makeScale(d.size[0], d.size[1], d.size[2])));
+      }
     }
-    decors.forEach((d, i) => {
-      const p = panels[d.panel];
-      const w = (p.top[d.seg] + p.bottom[d.seg]) / 2;
-      out.copy(chain[d.seg]).multiply(scratch.makeTranslation(d.x * w, -d.y * p.lens[d.seg], THICKNESS / 2 + d.size[2] * 0.6));
-      decorMesh.setMatrixAt(i, out.multiply(scratch.makeScale(d.size[0], d.size[1], d.size[2])));
-    });
     panelMesh.instanceMatrix.needsUpdate = true;
+    tileMesh.instanceMatrix.needsUpdate = true;
     decorMesh.instanceMatrix.needsUpdate = true;
   }
   const scratch = new THREE.Matrix4();
+  const tileRot = new THREE.Matrix4();
 
   // Merge the static parts (core, sleeves, hood, net, crest) into two skinned meshes.
   const partsMat = toon('#ffffff', { vertexColors: true });
@@ -461,7 +565,7 @@ export function createMasquerade(): Masquerade {
     const accLimit = 30;
     acc.clampLength(0, accLimit);
 
-    const flare = Math.min(0.5, Math.abs(yawRate) * 0.11);
+    const flare = Math.min(0.33, Math.abs(yawRate) * 0.07); // 0.33 per segment bends the panels out to a nearly flat disc
     for (const p of panels) {
       const [ox, oz] = p.out;
       const outward = vel.x * ox + vel.z * oz;
@@ -491,7 +595,9 @@ export function createMasquerade(): Masquerade {
       baked.forEach((b) => b.geometry.dispose());
       panelGeo.dispose();
       decorGeo.dispose();
+      tileGeo.dispose();
       panelMesh.dispose();
+      tileMesh.dispose();
       decorMesh.dispose();
       owned.forEach((mt) => mt.dispose());
     },
