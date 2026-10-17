@@ -2,9 +2,27 @@
 // with circle-vs-box/circle collisions that slide along walls. Screen up is world -z (the camera never turns).
 import * as THREE from 'three';
 
-export type Collider = { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number } | { kind: 'circle'; x: number; z: number; r: number };
+/** `wall` marks boxes a player can press their back against (building walls, fences, the danfo's flank), as opposed to furniture. */
+export type Collider = { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number; wall: boolean } | { kind: 'circle'; x: number; z: number; r: number };
 
-export const box = (x0: number, z0: number, x1: number, z1: number): Collider => ({ kind: 'box', minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) });
+export const box = (x0: number, z0: number, x1: number, z1: number, wall = false): Collider => ({ kind: 'box', minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), wall });
+
+/** Nearest wall box to a point on the ground plane: how far its face is and the unit normal pointing from the wall towards the point. */
+export function nearestWall(p: { x: number; z: number }, maxDistance: number, colliders: readonly Collider[]): { distance: number; normal: { x: number; z: number }; point: { x: number; z: number } } | null {
+  let best: { distance: number; normal: { x: number; z: number }; point: { x: number; z: number } } | null = null;
+  for (const c of colliders) {
+    if (c.kind !== 'box' || !c.wall) continue;
+    const nx = Math.min(c.maxX, Math.max(c.minX, p.x));
+    const nz = Math.min(c.maxZ, Math.max(c.minZ, p.z));
+    const dx = p.x - nx;
+    const dz = p.z - nz;
+    const d = Math.hypot(dx, dz);
+    if (d > maxDistance || (best && d >= best.distance)) continue;
+    if (d < 1e-6) continue; // standing inside a wall box: not a usable face
+    best = { distance: d, normal: { x: dx / d, z: dz / d }, point: { x: nx, z: nz } };
+  }
+  return best;
+}
 export const circle = (x: number, z: number, r: number): Collider => ({ kind: 'circle', x, z, r });
 
 /** Push a circle at (p.x, p.z) out of every collider it overlaps. Returns true if it moved. */
@@ -69,9 +87,11 @@ export class Input {
   private knob: HTMLDivElement;
   /** Set by tests / demos to drive the player without a device. */
   override: MoveInput | null = null;
+  /** While this returns true, pointer drags don't steer (e.g. the eyedropper is using the pointer). */
+  blocked: (() => boolean) | null = null;
   static readonly STICK_RADIUS = 64;
 
-  constructor(private el: HTMLElement) {
+  constructor(readonly el: HTMLElement) {
     addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return;
       this.keys.add(e.code);
@@ -84,7 +104,7 @@ export class Input {
     });
     el.style.touchAction = 'none';
     el.addEventListener('pointerdown', (e) => {
-      if (this.pointer) return;
+      if (this.pointer || this.blocked?.()) return;
       this.pointer = { id: e.pointerId, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY };
       el.setPointerCapture(e.pointerId);
       this.showStick(true);

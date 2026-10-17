@@ -43,7 +43,7 @@ export class TopDownCamera {
     this.samples[1].set(p.x, p.y + 0.9, p.z);
     this.samples[2].set(p.x, p.y + 1.6, p.z);
     for (const g of groups) {
-      g.target = this.samples.some((s) => g.blocks(this.camera.position, s, 0.3)) ? 0.18 : 1;
+      g.target = this.samples.some((s) => g.blocks(this.camera.position, s, 0.08)) ? 0.18 : 1;
       g.update(dt);
     }
   }

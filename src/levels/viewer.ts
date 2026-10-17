@@ -1,13 +1,15 @@
 // /?level=compound: the walkable compound. One player, no seeker, painting or game loop yet.
-// URL knobs: &markers=1 (hiding-spot markers + list, also toggled with M)  &stats=1 (fps / draw calls)  &at=x,z (start position)
+// Hold E to aim the eyedropper (click reads a surface's base colour), Q switches zone, 1-4 poses, H hunt mode, C camo debug text.
+// URL knobs: &hunt=0 (start with hair/hat/accessory visible)  &buttons=1 (touch buttons on desktop)  &markers=1 (hiding-spot markers + list, also toggled with M)  &stats=1 (fps / draw calls)  &at=x,z (start position)
 //            &view=overview|top or &camPos=x,y,z&camLook=x,y,z (fixed debug camera)  &autowalk=1 (walks a loop by itself, for measuring fps)
 import * as THREE from 'three';
 import { audio } from '../audio';
 import { mountAudioDebug } from '../audioDebug';
 import { createCharacter, type PlayerState } from '../character';
-import { applyPixelRatio } from '../fx';
+import { Fx, applyPixelRatio } from '../fx';
 import { addCompoundLighting, createCompound } from './compound';
 import { Input, stepPlayer, type MoveInput } from './controller';
+import { HidingController } from './hiding';
 import { TopDownCamera } from './topdown';
 
 const PLAYER_STYLE = { body: 'female', primaryColor: '#f4a300', secondaryColor: '#2b4c9b', skinColor: '#8d5524', hairColor: '#1b1b1b', hair: 'braids', hat: 'none', accessory: 'earrings' };
@@ -76,6 +78,8 @@ export async function startCompound(): Promise<void> {
   }
 
   const input = new Input(renderer.domElement);
+  const fx = new Fx(scene);
+  const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: coarse || q.has('buttons'), hunt: q.get('hunt') !== '0' });
   if (q.has('autowalk')) {
     // loop around the yard: east along the north side, south, west, north
     const route: [number, number][] = [[-9, -4.5], [9, -4.5], [9, 3], [-9, 3]];
@@ -93,7 +97,7 @@ export async function startCompound(): Promise<void> {
 
   // --- HUD
   const hint = overlay('left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.85;text-align:center;pointer-events:none');
-  hint.textContent = coarse ? 'Drag to walk · tap anywhere for sound' : 'WASD / arrows to walk, Shift to run · click for sound · M marks the hiding spots';
+  hint.textContent = coarse ? 'Drag to walk · Eyedropper then tap a surface to paint · tap for sound' : 'WASD walk, Shift run · hold E + click: eyedropper · Q zone · 1-4 poses · H hunt mode · C camo text · M spots';
   const stats = overlay('left:8px;bottom:8px;font:11px monospace;background:#0008;padding:4px 6px;border-radius:4px;display:none;pointer-events:none');
   const spotList = overlay('left:8px;top:8px;max-width:340px;max-height:calc(100% - 60px);overflow:auto;background:#000b;padding:8px 10px;border-radius:6px;font:11px/1.5 monospace;display:none');
   spotList.innerHTML =
@@ -158,19 +162,25 @@ export async function startCompound(): Promise<void> {
     last = now;
 
     const move = stepPlayer(pos, input.read(), dt, level.colliders, level.bounds);
-    const next: PlayerState = move.speed === 0 ? 'idle' : move.speed > 3.5 ? 'run' : 'walk';
-    if (next !== state) {
-      state = next;
-      player.play(state, 0.15);
-    }
     if (move.heading !== null) {
       let d = move.heading - yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       yaw += d * Math.min(1, dt * 14);
     }
+    const held = hiding.update(dt, { speed: move.speed, yaw });
+    if (held.yaw !== null) {
+      const d = Math.atan2(Math.sin(held.yaw - yaw), Math.cos(held.yaw - yaw));
+      yaw += d * Math.min(1, dt * 14);
+    }
+    const next: PlayerState = move.speed === 0 ? held.state : move.speed > 3.5 ? 'run' : 'walk';
+    if (next !== state) {
+      state = next;
+      player.play(state, 0.2);
+    }
     player.group.position.copy(pos);
     player.group.rotation.y = yaw;
     player.update(dt);
+    fx.update(dt, rig.camera, renderer);
 
     if (!debugCam) rig.update(dt, pos);
     rig.fade(level.fadeGroups, pos, dt);
@@ -195,6 +205,18 @@ export async function startCompound(): Promise<void> {
       camera: rig.camera,
       audio,
       input,
+      hiding,
+      player,
+      /** Test helper: put the follow camera on the player immediately. */
+      snapCamera() {
+        rig.snapTo(pos);
+        rig.camera.updateMatrixWorld(true);
+      },
+      /** Test helper: where a world point lands on screen (client pixels). */
+      screenOf(x: number, y: number, z: number) {
+        const v = new THREE.Vector3(x, y, z).project(rig.camera);
+        return { x: ((v.x + 1) / 2) * innerWidth, y: ((1 - v.y) / 2) * innerHeight };
+      },
       /** Test helper: walks `seconds` of game time in direction (x, y on screen) at 30 steps per second, ignoring the frame rate. */
       walk(x: number, y: number, seconds: number, run = false) {
         for (let i = 0; i < seconds * 30; i++) stepPlayer(pos, { x, y, run }, 1 / 30, level.colliders, level.bounds);

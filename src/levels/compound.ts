@@ -200,7 +200,7 @@ export async function createCompound(): Promise<Compound> {
         for (const [a, b] of [[x0, jl], [jr, x0 + ROOM_W]] as const) {
           pl.span(a, 0, zAt(0), b, 1.1, zAt(RECESS), lower);
           pl.span(a, 1.1, zAt(0), b, H, zAt(RECESS), upper);
-          colliders.push(box(a, zAt(0), b, zAt(RECESS)));
+          colliders.push(box(a, zAt(0), b, zAt(RECESS), true));
         }
         pl.span(jl, 2.2, zAt(0), jr, H, zAt(RECESS), upper); // lintel
         pl.box(dx, 1.08, zAt(RECESS - 0.05), DOOR_W - 0.04, 2.16, 0.06, doors[i]); // door leaf
@@ -226,7 +226,7 @@ export async function createCompound(): Promise<Compound> {
       addMesh(ea.build());
       surf(`${id}_eave_${s}`, `${label} zinc eave ${s + 1}`, 'roof edge', [pStart + (rooms * ROOM_W) / 2, 2.95, zAt(-1.1)], [rooms * ROOM_W, 0.6, 2.3], [0, -1, f], ea.baseOf(eaveColors[0]));
     }
-    colliders.push(box(-HALF, zAt(RECESS), HALF, zAt(BLOCK_DEPTH)));
+    colliders.push(box(-HALF, zAt(RECESS), HALF, zAt(BLOCK_DEPTH), true));
     const pl = new StaticBatch('probe', T.plaster_wall);
     surf(`${id}_lower`, `${label}, lower band`, 'wall', [0, 0.55, zAt(0.1)], [30, 1.1, 0.4], [0, 0, f], pl.baseOf(lower));
     surf(`${id}_upper`, `${label}, upper wall`, 'wall', [0, 2.15, zAt(0.1)], [30, 2.1, 0.4], [0, 0, f], pl.baseOf(upper));
@@ -243,7 +243,7 @@ export async function createCompound(): Promise<Compound> {
   const WALL_TURQ = '#2fa59b';
   walls.span(-HALF, 0, -9, -14.7, 2.6, 9, WALL_TURQ);
   walls.span(-HALF - 0.05, 2.6, -9, -14.65, 2.72, 9, '#d6cdb0');
-  colliders.push(box(-HALF - 0.4, -9, -14.7, 9));
+  colliders.push(box(-HALF - 0.4, -9, -14.7, 9, true));
   surf('west_wall', 'West wall (turquoise)', 'wall', [-14.7, 1.3, 0], [0.3, 2.6, 18], [1, 0, 0], walls.baseOf(WALL_TURQ));
 
   const zinc = new StaticBatch('zinc-fence', T.rusty_metal, { texel: 1.5, doubleSide: true });
@@ -257,7 +257,7 @@ export async function createCompound(): Promise<Compound> {
       surf(`zinc_${side > 0 ? 's' : 'n'}${k}`, 'Zinc fence sheet', 'fence', [14.9, 1.1, z], [0.1, 2.2, sheetW], [-1, 0, 0], zinc.baseOf(color));
     }
     zinc.span(14.84, 2.2, Math.min(side * 2.6, side * 9), 14.98, 2.28, Math.max(side * 2.6, side * 9), '#4b4038'); // top rail
-    colliders.push(box(14.8, Math.min(side * 2.6, side * 9), 15.0, Math.max(side * 2.6, side * 9)));
+    colliders.push(box(14.8, Math.min(side * 2.6, side * 9), 15.0, Math.max(side * 2.6, side * 9), true));
     for (let k = 0; k <= 6; k++) walls.add(new THREE.CylinderGeometry(0.06, 0.06, 2.3, 6), place(14.8, 1.15, side * (2.6 + sheetW * k)), '#5a4332');
   }
   for (const side of [-1, 1]) {
@@ -265,7 +265,7 @@ export async function createCompound(): Promise<Compound> {
     const z1 = side * 3.1;
     walls.span(14.5, 0, Math.min(z0, z1), 15.1, 2.9, Math.max(z0, z1), '#e8dcb8');
     walls.span(14.45, 2.9, Math.min(z0, z1) - 0.05, 15.15, 3.05, Math.max(z0, z1) + 0.05, '#2b958f');
-    colliders.push(box(14.5, Math.min(z0, z1), 15.1, Math.max(z0, z1)));
+    colliders.push(box(14.5, Math.min(z0, z1), 15.1, Math.max(z0, z1), true));
     surf(`gate_pillar_${side > 0 ? 's' : 'n'}`, 'Gate pillar', 'wall', [14.5, 1.45, (z0 + z1) / 2], [0.1, 2.9, 0.5], [-1, 0, 0], walls.baseOf('#e8dcb8'));
   }
   addMesh(zinc.build());
@@ -300,7 +300,7 @@ export async function createCompound(): Promise<Compound> {
   signWall.span(-14.7, 0, -1.6, -8.5, 2.4, -1.3, WALL_TURQ);
   signWall.span(-14.75, 2.4, -1.65, -8.45, 2.5, -1.25, '#d6cdb0');
   addMesh(signWall.build());
-  colliders.push(box(-14.7, -1.65, -8.45, -1.25));
+  colliders.push(box(-14.7, -1.65, -8.45, -1.25, true));
   surf('sign_wall', 'Painted partition wall (THIS HOUSE IS NOT FOR SALE)', 'wall', [-11.6, 1.2, -1.3], [6.2, 2.4, 0.3], [0, 0, 1], signWall.baseOf(WALL_TURQ));
   addMesh(decal(signA, 4.3, 1.75, -11.6, 1.38, -1.285, 0));
   addMesh(decal(signB, 1.6, 0.67, -10.9, 1.55, -8.988, 0));
@@ -481,7 +481,7 @@ export async function createCompound(): Promise<Compound> {
   wheelMesh.userData.baseColor = wheels[0].baseColor.clone();
   danfoGroup.add(bodyMesh, wheelMesh);
   group.add(danfoGroup);
-  colliders.push(box(8.85, 3.35, 13.55, 5.45));
+  colliders.push(box(8.85, 3.35, 13.55, 5.45, true));
   surf('danfo', 'Danfo (yellow, black stripes)', 'vehicle', [11.2, 1.0, 4.4], [4.7, 2.1, 2.0], [0, 0, -1], new THREE.Color(DANFO_YELLOW));
 
   // ---------------------------------------------------------------- hiding spots (every one reads its colour from the registry)
@@ -520,6 +520,7 @@ export async function createCompound(): Promise<Compound> {
   // debug markers: a floating diamond above each spot and a ring on the floor, two instanced draws, hidden unless asked for
   const markers = new THREE.Group();
   markers.visible = false;
+  markers.name = 'hiding-markers';
   const mkMat = () => new THREE.MeshBasicMaterial({ color: '#ff2fd0', depthTest: false, transparent: true, opacity: 0.9 });
   const diamonds = new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.14), mkMat(), hidingSpots.length);
   const rings = new THREE.InstancedMesh(new THREE.RingGeometry(0.28, 0.36, 20).rotateX(-Math.PI / 2), mkMat(), hidingSpots.length);

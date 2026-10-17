@@ -55,6 +55,10 @@ Licence for each: Creative Commons 0 (https://creativecommons.org/publicdomain/z
 | sfx_horn_motorbike_01.ogg | 13FMikovaA_jawa klakson | 13FPanska_Mikova_Adela | https://freesound.org/people/13FPanska_Mikova_Adela/sounds/378336/ |
 | sfx_horn_motorbike_02.ogg | 13FMikovaA_simson klakson | 13FPanska_Mikova_Adela | https://freesound.org/people/13FPanska_Mikova_Adela/sounds/378351/ |
 
+## Generated sounds
+
+`sfx_paint.ogg` (the paint splat) is synthesized with ffmpeg's `lavfi` sources (brown and white noise plus a falling sine chirp); no third-party material.
+
 ## Placeholder chant voices
 
 Placeholder voices generated with YarnGPT2 by Saheed Niyi (Apache 2.0): https://huggingface.co/saheedniyi/YarnGPT2
