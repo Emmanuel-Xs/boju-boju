@@ -38,6 +38,8 @@ const MUTE_KEY = 'boju.muted';
 
 export interface Voice {
   readonly name: string;
+  /** Length of the clip in seconds. */
+  readonly duration: number;
   /** Resolves when the clip finishes or is stopped. */
   readonly ended: Promise<void>;
   stop(fade?: number): void;
@@ -117,6 +119,8 @@ export interface ChantOptions {
   /** Max time spent in the ask/not_yet loop before the chant opens anyway. */
   timeoutMs?: number;
   onPhase?: (phase: ChantPhase) => void;
+  /** Called as each line of the chant starts, with its length in seconds (for on-screen lyrics). */
+  onLine?: (name: ClipName, seconds: number) => void;
 }
 
 // --- placeholder synthesis ---------------------------------------------------
@@ -389,6 +393,7 @@ class AudioManager {
     const entry = { name, voice: null as unknown as Voice };
     const voice: Voice = {
       name,
+      duration: buffer.duration,
       ended,
       stop: (fade = 0) => {
         const t = ctx.currentTime;
@@ -479,6 +484,7 @@ class AudioManager {
     const play = async (name: ClipName) => {
       const v = await this.playOnce(name);
       if (!v || !alive()) return;
+      opts.onLine?.(name, v.duration);
       await v.ended;
     };
 

@@ -38,6 +38,8 @@ interface Hen {
   lookYaw: number;
   lookTarget: number;
   speed: number;
+  /** Seconds spent pressed against something while trying to walk. */
+  stuck: number;
 }
 
 const tmp = new THREE.Matrix4();
@@ -126,7 +128,7 @@ export class Chickens {
 
     const a = cfg.area;
     for (let i = 0; i < n; i++) {
-      const hen: Hen = { x: 0, z: 0, yaw: this.r() * Math.PI * 2, state: 'idle', timer: rand(this.r, cfg.idleTime) * this.r(), tx: 0, tz: 0, phase: this.r() * 6, peckPhase: this.r() * 6, hop: 0, hopV: 0, lookYaw: 0, lookTarget: 0, speed: 0 };
+      const hen: Hen = { x: 0, z: 0, yaw: this.r() * Math.PI * 2, state: 'idle', timer: rand(this.r, cfg.idleTime) * this.r(), tx: 0, tz: 0, phase: this.r() * 6, peckPhase: this.r() * 6, hop: 0, hopV: 0, lookYaw: 0, lookTarget: 0, speed: 0, stuck: 0 };
       for (let tries = 0; tries < 40; tries++) {
         hen.x = a.minX + this.r() * (a.maxX - a.minX);
         hen.z = a.minZ + this.r() * (a.maxZ - a.minZ);
@@ -220,20 +222,29 @@ export class Chickens {
           h.timer = rand(this.r, c.idleTime);
         } else {
           target = h.state === 'flee' ? c.fleeSpeed : c.walkSpeed;
-          const want = Math.atan2(dx, dz);
-          h.yaw += Math.atan2(Math.sin(want - h.yaw), Math.cos(want - h.yaw)) * Math.min(1, dt * (h.state === 'flee' ? 14 : 6));
+          // turn towards the target at a limited rate (never a snap), and stop steering once it is right under the beak
+          if (d > 0.25) {
+            const want = Math.atan2(dx, dz);
+            const diff = Math.atan2(Math.sin(want - h.yaw), Math.cos(want - h.yaw));
+            const maxTurn = (h.state === 'flee' ? 11 : 4.5) * dt;
+            h.yaw += Math.max(-maxTurn, Math.min(maxTurn, diff));
+          }
         }
       }
       h.speed += (target - h.speed) * Math.min(1, dt * 9);
       if (h.speed > 0.02) {
         const p = { x: h.x + Math.sin(h.yaw) * h.speed * dt, z: h.z + Math.cos(h.yaw) * h.speed * dt };
-        const before = { x: p.x, z: p.z };
-        resolveCollisions(p, c.radius, this.colliders, -5);
+        const bumped = resolveCollisions(p, c.radius, this.colliders, -5);
         p.x = Math.min(c.area.maxX + 0.5, Math.max(c.area.minX - 0.5, p.x));
         p.z = Math.min(c.area.maxZ + 0.5, Math.max(c.area.minZ - 0.5, p.z));
-        if (h.state === 'walk' && Math.hypot(p.x - before.x, p.z - before.z) > 0.01) this.pickTarget(h); // bumped into something: choose again
         h.x = p.x;
         h.z = p.z;
+        // pressed against something for a while: pick a new way, once (not every frame, which made them spin on the spot)
+        h.stuck = bumped && h.state === 'walk' ? h.stuck + dt : 0;
+        if (h.stuck > 0.45) {
+          h.stuck = 0;
+          this.pickTarget(h);
+        }
         h.phase += dt * (3 + h.speed * 5);
       }
       if (h.state === 'peck') h.peckPhase += dt * 7;

@@ -12,6 +12,7 @@ import { Input, PLAYER_RADIUS, PlayerBody, RUN_SPEED, WALK_SPEED, type MoveInput
 import { Seeker } from '../seeker';
 import { Chickens } from './chickens';
 import { HidingController } from './hiding';
+import { createLyrics } from './lyrics';
 import { Round, ROUND_CONFIG } from './round';
 import { createRoundHud } from './roundHud';
 import { TopDownCamera } from './topdown';
@@ -185,12 +186,14 @@ export async function startCompound(): Promise<void> {
   let wasGrounded = true;
   let firstRound = true;
   const roundHud = createRoundHud();
+  const lyrics = createLyrics();
   const roundCfg = { ...ROUND_CONFIG, prepSeconds: Number(q.get('prep') ?? ROUND_CONFIG.prepSeconds), huntSeconds: Number(q.get('hunt_s') ?? ROUND_CONFIG.huntSeconds) };
   const round =
     q.get('round') === '0'
       ? null
       : new Round(
           {
+            onLine: (name, seconds) => lyrics.sing(name, seconds),
             onPhase: (phase) => {
               if (phase === 'prep') {
                 // a fresh round: back to the start (the first one starts where the URL says), the masquerade has its eyes covered
@@ -253,7 +256,10 @@ export async function startCompound(): Promise<void> {
   if (seeker) {
     seeker.onCaught = () => {
       fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.2, pos.z));
-      void audio.unlock().then(() => audio.playOnce('caught', { volume: 0.9 }));
+      void audio.unlock().then(async () => {
+        const v = await audio.playOnce('caught', { volume: 0.9 });
+        lyrics.sing('caught', v?.duration ?? 0.9);
+      });
       round?.caught();
     };
   }

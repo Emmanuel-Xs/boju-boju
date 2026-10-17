@@ -35,9 +35,25 @@ const JUMP_BUFFER = 0.12; // s before landing in which a jump press is remembere
 const ACCEL = 13; // 1/s: how quickly velocity follows the input on the ground
 const BRAKE = 16;
 const AIR_CONTROL = 3.5;
+/** Tallest prop the player climbs by walking into it (m above the feet). Taller ones need a running jump from another prop. */
+export const AUTO_CLIMB_MAX = 1.5;
+const AUTO_CLIMB_HOLD = 0.1; // s of pushing into a prop before the climb starts, so brushing past one doesn't hop
 
 /** Whether a collider blocks a player whose feet are at height `y`. */
 const solid = (c: Collider, y: number) => !c.climb || y + STEP_UP < c.top;
+
+/** The climbable prop directly ahead of the feet that is too tall to step onto but within auto-climb reach: its top height, or null. */
+export function climbableAhead(x: number, z: number, dx: number, dz: number, y: number, radius: number, colliders: readonly Collider[]): number | null {
+  const px = x + dx * (radius + 0.12);
+  const pz = z + dz * (radius + 0.12);
+  let best: number | null = null;
+  for (const c of colliders) {
+    if (!c.climb || y + STEP_UP >= c.top || c.top - y > AUTO_CLIMB_MAX) continue;
+    const inside = c.kind === 'box' ? px >= c.minX && px <= c.maxX && pz >= c.minZ && pz <= c.maxZ : Math.hypot(px - c.x, pz - c.z) <= c.r;
+    if (inside && (best === null || c.top < best)) best = c.top; // the lowest ledge in the way is the one to climb first
+  }
+  return best;
+}
 
 /** Height of the highest climbable prop under a point that the player can stand on from height `y` (0 = the floor). */
 export function groundAt(x: number, z: number, y: number, colliders: readonly Collider[]): number {
@@ -272,6 +288,9 @@ export class PlayerBody {
   radius = PLAYER_RADIUS;
   private coyote = COYOTE;
   private jumpBuffer = 0;
+  private pushT = 0;
+  /** True while an automatic climb is carrying the player up (for the viewer to show the jump pose). */
+  climbing = false;
 
   constructor(pos: THREE.Vector3) {
     this.pos = pos;
@@ -298,6 +317,21 @@ export class PlayerBody {
     this.vx += (tx - this.vx) * f;
     this.vz += (tz - this.vz) * f;
     if (!steering && Math.hypot(this.vx, this.vz) < 0.12) this.vx = this.vz = 0;
+
+    // auto-climb: keep walking into a climbable prop that is too tall to step on and the player hops up onto it
+    if (steering && this.grounded && !input.jump) {
+      const top = climbableAhead(this.pos.x, this.pos.z, input.x / len, input.y / len, this.pos.y, this.radius, colliders);
+      this.pushT = top !== null ? this.pushT + dt : 0;
+      if (top !== null && this.pushT >= AUTO_CLIMB_HOLD) {
+        this.vy = Math.sqrt(2 * GRAVITY * (top - this.pos.y + 0.14)); // just enough to clear the ledge
+        this.pos.y += 0.01;
+        this.grounded = false;
+        this.coyote = 0;
+        this.pushT = 0;
+        this.climbing = true;
+      }
+    } else if (!steering) this.pushT = 0;
+    if (this.grounded) this.climbing = false;
 
     // horizontal move, sub-stepped so a fast frame can't tunnel through a thin wall
     const x0 = this.pos.x;

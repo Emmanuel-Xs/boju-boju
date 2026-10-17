@@ -1,6 +1,6 @@
 // One round, as in Meccha Chameleon: a prep phase while the seeker has its eyes covered (hide and paint), then a timed hunt.
 //   Survive until the hourglass runs out to win; get caught and the round restarts.
-import { audio } from '../audio';
+import { audio, type ClipName } from '../audio';
 
 export const ROUND_CONFIG = {
   /** Seconds of prep: the masquerade sings with its eyes covered. */
@@ -15,6 +15,8 @@ export type Phase = 'prep' | 'hunt' | 'won' | 'lost';
 
 export interface RoundHooks {
   onPhase(phase: Phase): void;
+  /** A line of the chant started (for the lyrics on screen). */
+  onLine?(name: ClipName, seconds: number): void;
 }
 
 export class Round {
@@ -43,7 +45,7 @@ export class Round {
   startChant(): void {
     if (this.chanting || this.phase !== 'prep' || !audio.unlocked) return;
     this.chanting = true;
-    void audio.startChant({ timeoutMs: this.left * 1000 + 4000 }).finally(() => (this.chanting = false));
+    void audio.startChant({ timeoutMs: this.left * 1000 + 4000, onLine: (n, sec) => this.hooks.onLine?.(n, sec) }).finally(() => (this.chanting = false));
   }
 
   update(dt: number): void {
