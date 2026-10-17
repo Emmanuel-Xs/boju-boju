@@ -2,9 +2,23 @@
 import * as THREE from 'three';
 import type { FadeGroup } from './kit';
 
+/** Critically damped follow (the same easing Unity's SmoothDamp uses): no overshoot, no jitter, independent of the frame rate. */
+function smoothDamp(current: number, target: number, vel: { v: number }, smoothTime: number, dt: number): number {
+  const omega = 2 / smoothTime;
+  const x = omega * dt;
+  const e = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const change = current - target;
+  const temp = (vel.v + omega * change) * dt;
+  vel.v = (vel.v - omega * temp) * e;
+  return target + (change + temp) * e;
+}
+
 export class TopDownCamera {
   readonly camera: THREE.PerspectiveCamera;
   private focus = new THREE.Vector3();
+  private vx = { v: 0 };
+  private vy = { v: 0 };
+  private vz = { v: 0 };
   private samples = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
   constructor(
@@ -24,11 +38,16 @@ export class TopDownCamera {
 
   snapTo(p: THREE.Vector3): void {
     this.focus.copy(p);
+    this.vx.v = this.vy.v = this.vz.v = 0;
     this.apply();
   }
 
-  update(dt: number, p: THREE.Vector3): void {
-    this.focus.lerp(p, 1 - Math.exp(-dt * 7));
+  /** `vx`, `vz`: the player's ground velocity, so the camera leads a little in the direction of travel. */
+  update(dt: number, p: THREE.Vector3, vx = 0, vz = 0): void {
+    const lead = 0.16;
+    this.focus.x = smoothDamp(this.focus.x, p.x + vx * lead, this.vx, 0.16, dt);
+    this.focus.z = smoothDamp(this.focus.z, p.z + vz * lead, this.vz, 0.16, dt);
+    this.focus.y = smoothDamp(this.focus.y, p.y, this.vy, 0.32, dt); // jumps and climbs shouldn't bounce the view
     this.apply();
   }
 

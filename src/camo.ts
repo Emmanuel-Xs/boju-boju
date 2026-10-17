@@ -33,11 +33,11 @@ export const CAMO_CONFIG = {
     /** Back against a wall box, facing out. */
     wall_flat: { maxWallDistance: 0.45, backToWallDot: 0.7 },
     /** Next to drums or sacks (crates stand in for sacks until we have a model). */
-    curl_ball: { radius: 1.1, kinds: ['drums', 'crates', 'chairs'] },
+    curl_ball: { radius: 1.1, kinds: ['drums', 'crates', 'chairs', 'sacks', 'tyres', 'firewood'] },
     /** Behind a low prop, with the prop between the viewer and the player. */
-    crouch: { radius: 1.2, maxHeight: 1.3, kinds: ['bench', 'table', 'crates', 'chairs', 'generator', 'drums'], viewerSideDot: 0.3 },
+    crouch: { radius: 1.2, maxHeight: 1.3, kinds: ['bench', 'table', 'crates', 'chairs', 'generator', 'drums', 'sacks', 'tyres', 'gas', 'bike', 'blocks', 'firewood', 'fabric', 'planter'], viewerSideDot: 0.3 },
     /** Standing like part of the scenery: beside poles, foliage or a chair stack. */
-    stand_stiff: { radius: 0.9, kinds: ['cloth', 'foliage', 'chairs'] },
+    stand_stiff: { radius: 0.9, kinds: ['cloth', 'foliage', 'chairs', 'tank', 'gas', 'canopy'] },
   },
   /** Shape credit (0..1) for a pose that suits nothing nearby. */
   mismatchCredit: 0,

@@ -76,7 +76,7 @@ function scarfColor(style: StartNgStyle): string {
 
 // --- animation states --------------------------------------------------------
 
-export const PLAYER_STATES = ['idle', 'walk', 'run', 'stand_stiff', 'crouch', 'wall_flat', 'curl_ball'] as const;
+export const PLAYER_STATES = ['idle', 'walk', 'run', 'jump', 'stand_stiff', 'crouch', 'wall_flat', 'curl_ball'] as const;
 export type PlayerState = (typeof PLAYER_STATES)[number];
 export type PaintZone = 'top' | 'bottom';
 
@@ -114,6 +114,23 @@ const PLAYER_CLIPS: Record<PlayerState, Clip<PlayerState>> = {
       shoulderR: { rz: 0.07 + b * 0.01 },
       elbowL: { rx: -0.12 },
       elbowR: { rx: -0.12 },
+    };
+  },
+  // In the air: arms up and out, one knee driven forward, the other trailing.
+  jump: (t) => {
+    const k = Math.min(1, t / 0.12);
+    return {
+      hips: { py: 0.03 * k },
+      spine: { rx: 0.1 * k },
+      head: { rx: -0.1 * k },
+      hipL: { rx: -0.85 * k },
+      kneeL: { rx: 1.2 * k },
+      hipR: { rx: 0.35 * k },
+      kneeR: { rx: 0.7 * k },
+      shoulderL: { rx: -2.3 * k, rz: -0.45 * k },
+      shoulderR: { rx: -2.3 * k, rz: 0.45 * k },
+      elbowL: { rx: -0.35 * k },
+      elbowR: { rx: -0.35 * k },
     };
   },
   walk: (t) => locomotion(t, { freq: 1.0, leg: 0.5, knee: 0.7, arm: 0.45, elbow: 0.25, bob: 0.025, lean: 0.04 }),

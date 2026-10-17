@@ -1,5 +1,5 @@
 // DOM HUD for hiding and painting: zone swatches, camo meter, debug text, crosshair, toast, and touch buttons.
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { PaintZone } from '../character';
 
 const css = (el: HTMLElement, text: string) => (el.style.cssText = text);
@@ -14,12 +14,21 @@ export interface Hud {
   crosshair(show: boolean, x?: number, y?: number, valid?: boolean, swatch?: { color: THREE.Color; label: string } | null, dim?: boolean): void;
   setAiming(on: boolean): void;
   setPose(pose: string | null): void;
+  /** Colours picked so far, newest first; clicking one paints the selected zone with it. */
+  setRecent(items: { color: THREE.Color; label: string }[]): void;
+  toggleLegend(): void;
+  togglePalette(): void;
 }
 
 export interface HudHandlers {
   eyedropper(): void;
   zone(): void;
+  selectZone(zone: PaintZone): void;
+  recent(index: number): void;
   pose(index: number): void;
+  jump(): void;
+  /** A swatch from the palette (already scaled by the brightness bar). */
+  palette(color: THREE.Color, name: string): void;
 }
 
 const POSE_LABELS = ['1 Stiff', '2 Crouch', '3 Wall', '4 Ball'];
@@ -66,11 +75,50 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     zoneBox.appendChild(wrap);
     swatches[zone] = { wrap, chip: sw, note };
   }
-  panel.append(meterBox, zoneBox);
+  for (const zone of ['top', 'bottom'] as const) {
+    const w = swatches[zone].wrap;
+    css(w, w.style.cssText + ';pointer-events:auto;cursor:pointer');
+    w.title = `Paint the ${zone} (Q switches)`;
+    w.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      h.selectZone(zone);
+    });
+  }
+
+  // eyedropper banner and the recently picked colours
+  const banner = document.createElement('div');
+  css(banner, 'display:none;background:#2a7fffd9;border-radius:6px;padding:6px 8px;font-weight:600;font-size:12px;line-height:1.35');
+  const recentBox = document.createElement('div');
+  css(recentBox, 'display:none;background:#000a;border-radius:6px;padding:6px 8px');
+  const recentLabel = Object.assign(document.createElement('div'), { textContent: 'Recent colours (click to paint the selected zone)' });
+  css(recentLabel, 'font-size:10px;opacity:.75;margin-bottom:4px');
+  const recentRow = document.createElement('div');
+  css(recentRow, 'display:flex;flex-wrap:wrap;gap:5px');
+  recentBox.append(recentLabel, recentRow);
+  panel.append(banner, meterBox, zoneBox, recentBox);
 
   const debug = document.createElement('pre');
   css(debug, 'margin:0;background:#000b;border-radius:6px;padding:6px 8px;font:10px/1.45 monospace;white-space:pre-wrap;word-break:break-word');
   panel.appendChild(debug);
+
+  // controls legend: big keycaps on a dark card, bottom centre (hidden on touch, where the buttons say it all)
+  const legend = document.createElement('div');
+  css(legend, 'position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:' + (touch ? 'none' : 'flex') + ';gap:6px 18px;flex-wrap:wrap;justify-content:center;max-width:min(1100px,calc(100% - 24px));background:#000d;border:1px solid #fff3;border-radius:10px;padding:8px 14px;font:600 14px/1.2 system-ui,sans-serif;color:#fff;text-shadow:none');
+  const kbd = (t: string) => `<kbd style="display:inline-block;min-width:22px;text-align:center;padding:3px 7px;margin:0 2px;border:1px solid #fffa;border-bottom-width:3px;border-radius:6px;background:#ffffff26;font:700 13px ui-monospace,monospace">${t}</kbd>`;
+  const group = (label: string, body: string) => `<span style="display:inline-flex;align-items:center;gap:4px"><span style="opacity:.65;font-weight:500;margin-right:3px">${label}</span>${body}</span>`;
+  legend.innerHTML = [
+    group('Move', kbd('W') + kbd('A') + kbd('S') + kbd('D')),
+    group('Run', kbd('Shift')),
+    group('Jump / climb', kbd('Space')),
+    group('Eyedropper', kbd('E') + ' then click'),
+    group('Zone', kbd('Q')),
+    group('Poses', kbd('1') + kbd('2') + kbd('3') + kbd('4')),
+    group('Hunt mode', kbd('H')),
+    group('Camo text', kbd('C')),
+    group('Hiding spots', kbd('M')),
+    group('Hide this', kbd('K')),
+  ].join('');
+  root.appendChild(legend);
 
   // toast
   const toastEl = document.createElement('div');
@@ -94,24 +142,85 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
   cross.append(ring, dot, previewBox);
   root.appendChild(cross);
 
-  // touch buttons
+  // palette in the style of Meccha Chameleon's painting UI: a swatch grid and a brightness bar, top left
+  const PALETTE: [string, string][] = [
+    ['#479fe0', 'Lagos sky'], ['#ccccc2', 'Harmattan haze'], ['#d88b47', 'Late sun'], ['#92572f', 'Red earth'],
+    ['#514d48', 'Shadow'], ['#301e16', 'Dark wood'], ['#e8bf1a', 'Danfo yellow'], ['#2fa59b', 'Compound turquoise'],
+    ['#e8dcb8', 'Cream plaster'], ['#a8322d', 'Door red'], ['#2a5db0', 'Drum blue'], ['#2f7d3a', 'Door green'],
+  ];
+  const palette = document.createElement('div');
+  css(palette, `position:absolute;left:${touch ? 8 : 74}px;top:8px;background:#000b;border-radius:8px;padding:8px 10px;width:176px;pointer-events:auto;display:${touch ? 'none' : 'block'}`);
+  const palTitle = document.createElement('div');
+  css(palTitle, 'font:700 12px system-ui;margin-bottom:6px;display:flex;justify-content:space-between');
+  palTitle.innerHTML = '<span>Palette</span><span style="opacity:.6;font-weight:500">P</span>';
+  const grid = document.createElement('div');
+  css(grid, 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px');
+  const bright = document.createElement('input');
+  bright.type = 'range';
+  bright.min = '45';
+  bright.max = '150';
+  bright.value = '100';
+  css(bright, 'width:100%;margin:8px 0 0;accent-color:#f1c232');
+  const brightLabel = Object.assign(document.createElement('div'), { textContent: 'Brightness' });
+  css(brightLabel, 'font:11px system-ui;opacity:.75;margin-top:6px');
+  const shown = (c: string) => {
+    const col = new THREE.Color(c).multiplyScalar(Number(bright.value) / 100);
+    return col;
+  };
+  const swatchButtons: [HTMLButtonElement, string][] = [];
+  for (const [c, name] of PALETTE) {
+    const b = document.createElement('button');
+    css(b, 'height:30px;border-radius:6px;border:2px solid #fffb;cursor:pointer;padding:0');
+    b.title = `${name} ${c}`;
+    b.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      h.palette(shown(c), name);
+    });
+    grid.appendChild(b);
+    swatchButtons.push([b, c]);
+  }
+  const refreshSwatches = () => swatchButtons.forEach(([b, c]) => (b.style.background = hex(shown(c))));
+  refreshSwatches();
+  bright.addEventListener('input', refreshSwatches);
+  bright.addEventListener('pointerdown', (e) => e.stopPropagation());
+  palette.append(palTitle, grid, brightLabel, bright);
+  root.appendChild(palette);
+
+  // buttons: a vertical tool bar down the left edge on desktop (like the game's tool icons), thumb buttons on touch
   let eyeBtn: HTMLButtonElement | null = null;
   let poseBtns: HTMLButtonElement[] = [];
+  const tools = document.createElement('div');
+  css(tools, 'position:absolute;left:8px;top:50%;transform:translateY(-50%);display:' + (touch ? 'none' : 'flex') + ';flex-direction:column;gap:6px');
+  root.appendChild(tools);
+  const mk = (text: string, on: () => void, style: string, parent: HTMLElement = root) => {
+    const b = document.createElement('button');
+    b.textContent = text;
+    css(b, `pointer-events:auto;touch-action:manipulation;font:600 12px system-ui;color:#fff;background:#000a;border:2px solid #fff8;cursor:pointer;${style}`);
+    b.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      on();
+    });
+    parent.appendChild(b);
+    return b;
+  };
+  const togglePalette = () => {
+    palette.style.display = palette.style.display === 'none' ? 'block' : 'none';
+  };
   if (touch) {
-    const mk = (text: string, on: () => void, style: string) => {
-      const b = document.createElement('button');
-      b.textContent = text;
-      css(b, `pointer-events:auto;touch-action:manipulation;position:absolute;font:600 12px system-ui;color:#fff;background:#000a;border:2px solid #fff8;border-radius:26px;${style}`);
-      b.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        on();
-      });
-      root.appendChild(b);
-      return b;
-    };
-    eyeBtn = mk('Eyedropper', h.eyedropper, 'right:12px;bottom:84px;width:92px;height:48px');
-    mk('Zone', h.zone, 'right:12px;bottom:28px;width:92px;height:44px');
-    poseBtns = POSE_LABELS.map((l, i) => mk(l, () => h.pose(i), `left:${12 + i * 70}px;bottom:28px;width:64px;height:44px;border-radius:12px`));
+    const abs = 'position:absolute;border-radius:26px;';
+    eyeBtn = mk('Eyedropper', h.eyedropper, abs + 'right:12px;bottom:196px;width:100px;height:52px');
+    mk('Palette', togglePalette, abs + 'right:12px;bottom:140px;width:100px;height:46px');
+    mk('Zone', h.zone, abs + 'right:12px;bottom:84px;width:100px;height:46px');
+    mk('Jump', h.jump, abs + 'right:12px;bottom:20px;width:100px;height:54px;background:#1a8a3acc');
+    poseBtns = POSE_LABELS.map((l, i) => mk(l, () => h.pose(i), `${abs}left:${12 + i * 70}px;bottom:28px;width:64px;height:44px;border-radius:12px`));
+  } else {
+    const tool = 'width:56px;height:46px;border-radius:12px;line-height:1.15;';
+    eyeBtn = mk('Pick\n(E)', h.eyedropper, tool, tools);
+    mk('Zone\n(Q)', h.zone, tool, tools);
+    mk('Palette\n(P)', togglePalette, tool, tools);
+    poseBtns = ['Stiff\n(1)', 'Crouch\n(2)', 'Wall\n(3)', 'Ball\n(4)'].map((l, i) => mk(l, () => h.pose(i), tool, tools));
+    for (const b of [eyeBtn, ...poseBtns]) b.style.whiteSpace = 'pre';
+    for (const b of tools.querySelectorAll('button')) (b as HTMLElement).style.whiteSpace = 'pre';
   }
 
   return {
@@ -156,7 +265,28 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     },
     setAiming(on) {
       if (eyeBtn) eyeBtn.style.background = on ? '#2a7fffcc' : '#000a';
+      banner.style.display = on ? 'block' : 'none';
+      banner.textContent = touch ? 'EYEDROPPER: tap a surface within 4 m' : 'EYEDROPPER ON: click a surface within 4 m. Q switches zone, E or Esc stops';
     },
+    setRecent(items) {
+      recentBox.style.display = items.length ? 'block' : 'none';
+      recentRow.replaceChildren(
+        ...items.map((it, i) => {
+          const b = document.createElement('button');
+          css(b, `pointer-events:auto;cursor:pointer;width:24px;height:24px;border-radius:5px;border:2px solid #fffb;padding:0;background:${hex(it.color)}`);
+          b.title = `${it.label} ${hex(it.color)}`;
+          b.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            h.recent(i);
+          });
+          return b;
+        }),
+      );
+    },
+    toggleLegend() {
+      legend.style.display = legend.style.display === 'none' ? 'flex' : 'none';
+    },
+    togglePalette,
     setPose(pose) {
       poseLine.textContent = pose ? `pose: ${pose}` : 'pose: none (moving breaks a pose)';
       const idx = POSE_NAMES.indexOf(pose ?? '');

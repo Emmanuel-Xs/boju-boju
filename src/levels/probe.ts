@@ -17,6 +17,8 @@ export interface Reading {
 export class LevelProbe implements CamoProbe {
   private ray = new THREE.Raycaster();
   private targets: THREE.Mesh[] = [];
+  /** What blocks a line of sight: walls and props, but not floors, painted decals or the see-through umbrella. */
+  private blockers: THREE.Mesh[] = [];
   private v = new THREE.Vector3();
 
   constructor(
@@ -25,7 +27,10 @@ export class LevelProbe implements CamoProbe {
   ) {
     const walk = (o: THREE.Object3D) => {
       if (o.name === 'hiding-markers' || o.name === 'surfaces') return;
-      if (o instanceof THREE.Mesh) this.targets.push(o);
+      if (o instanceof THREE.Mesh) {
+        this.targets.push(o);
+        if (!['ground', 'dirt', 'veranda-tiles', 'umbrella'].includes(o.name) && !o.userData.decal) this.blockers.push(o);
+      }
       o.children.forEach(walk);
     };
     walk(level.group);
@@ -63,6 +68,16 @@ export class LevelProbe implements CamoProbe {
       if (r) return r;
     }
     return null;
+  }
+
+  /** True when a wall or prop sits between the two points (the last `margin` metres before `to` are ignored, so the surface behind a hider doesn't count). */
+  blocked(from: THREE.Vector3, to: THREE.Vector3, margin = 0.3): boolean {
+    const dir = this.v.copy(to).sub(from);
+    const d = dir.length();
+    if (d < margin) return false;
+    this.ray.set(from, dir.normalize());
+    this.ray.far = d - margin;
+    return this.ray.intersectObjects(this.blockers, false).length > 0;
   }
 
   near(point: THREE.Vector3, radius: number): NearSurface[] {

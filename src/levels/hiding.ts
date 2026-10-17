@@ -1,6 +1,7 @@
 // Hiding and painting for the player: eyedropper, paint, held poses, and the live camo meter with its debug overlay.
-//   Hold E (or tap the Eyedropper button) and aim at a surface within 4 m; click / tap reads its userData.baseColor into the selected zone.
-//   Q switches zone. 1-4: stand_stiff, crouch, wall_flat, curl_ball. Moving breaks a pose. H toggles hunt mode, C the camo debug text.
+//   Press E (or tap the Eyedropper button) to switch the eyedropper on, aim at a surface within 4 m and click / tap: its userData.baseColor goes into the
+//   selected zone. On desktop it stays on for more picks (E or Esc stops; holding E works as push-to-pick). Picked colours are kept as clickable chips.
+//   Q or a click on a zone swatch switches zone. P shows the palette (swatch grid + brightness bar). 1-4: stand_stiff, crouch, wall_flat, curl_ball. Moving breaks a pose. H hunt mode, C camo text, K controls card.
 import * as THREE from 'three';
 import { audio } from '../audio';
 import { CamoMeter, describeBreakdown } from '../camo';
@@ -31,6 +32,8 @@ export interface HidingOptions {
   touch: boolean;
   /** Start in hunt mode (hat, hair and accessory hidden), as in the real game. */
   hunt: boolean;
+  /** The viewer the camo score is measured against: the seeker's eye. Falls back to the camera while there is no seeker. */
+  eye?: () => THREE.Vector3 | null;
 }
 
 export interface FrameInfo {
@@ -45,8 +48,11 @@ export class HidingController {
   zone: PaintZone = 'top';
   readonly painted: Record<PaintZone, boolean> = { top: false, bottom: false };
   pose: PlayerState | null = null;
-  private holdAim = false;
-  private stickyAim = false;
+  private aimOn = false;
+  private eDownAt = 0;
+  private eSuppressRelease = false;
+  private recent: { color: THREE.Color; label: string }[] = [];
+  private hitMarker: THREE.Mesh;
   private cooldownUntil = 0; // wall-clock ms, so the 0.4 s cooldown doesn't stretch on a slow frame rate
   private snap: { from: THREE.Vector3; to: THREE.Vector3; t: number } | null = null;
   private poseYaw: number | null = null;
@@ -64,9 +70,20 @@ export class HidingController {
     o.player.setHuntMode(o.hunt);
 
     this.hud = createHud(o.touch, {
-      eyedropper: () => this.toggleStickyAim(),
+      eyedropper: () => this.toggleAim(),
       zone: () => this.toggleZone(),
+      selectZone: (z) => {
+        this.zone = z;
+      },
+      recent: (i) => {
+        const r = this.recent[i];
+        if (r && !this.cooling) this.paint({ color: r.color, label: r.label });
+      },
       pose: (i) => this.setPose(POSES[i]),
+      jump: () => o.input.queueJump(),
+      palette: (color, name) => {
+        if (!this.cooling) this.paint({ color, label: name });
+      },
     });
     this.hud.setPose(null);
     this.hud.setDebugVisible(this.debugOn);
@@ -77,12 +94,17 @@ export class HidingController {
     );
     this.reachRing.visible = false;
     this.reachRing.renderOrder = 5;
-    o.scene.add(this.reachRing);
+    this.hitMarker = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, transparent: true, opacity: 0.95 }));
+    this.hitMarker.visible = false;
+    this.hitMarker.renderOrder = 6;
+    o.scene.add(this.reachRing, this.hitMarker);
 
     o.input.blocked = () => this.aiming;
     addEventListener('keydown', (e) => this.onKey(e, true));
     addEventListener('keyup', (e) => this.onKey(e, false));
-    addEventListener('blur', () => (this.holdAim = false));
+    addEventListener('blur', () => {
+      if (this.aimOn && performance.now() - this.eDownAt > 350) this.aimOn = false;
+    });
     addEventListener('pointermove', (e) => this.pointer.set(e.clientX, e.clientY));
     o.input.el.addEventListener('pointerdown', (e) => {
       this.pointer.set(e.clientX, e.clientY);
@@ -94,14 +116,38 @@ export class HidingController {
     return performance.now() < this.cooldownUntil;
   }
 
+  toast(msg: string): void {
+    this.hud.toast(msg);
+  }
+
+  /** Drop any held pose (e.g. after being caught). */
+  clearPose(): void {
+    this.pose = null;
+    this.snap = null;
+    this.poseYaw = null;
+  }
+
   get aiming(): boolean {
-    return this.holdAim || this.stickyAim;
+    return this.aimOn;
   }
 
   private onKey(e: KeyboardEvent, down: boolean): void {
     if (e.code === 'KeyE') {
-      this.holdAim = down;
-      if (down && !e.repeat) this.sinceHover = 1;
+      if (e.repeat) return;
+      if (down) {
+        // a tap toggles; holding E and releasing after a moment is push-to-pick
+        if (this.aimOn) {
+          this.aimOn = false;
+          this.eSuppressRelease = true;
+        } else {
+          this.aimOn = true;
+          this.eDownAt = performance.now();
+          this.sinceHover = 1;
+        }
+      } else {
+        if (!this.eSuppressRelease && performance.now() - this.eDownAt > 350) this.aimOn = false;
+        this.eSuppressRelease = false;
+      }
       return;
     }
     if (!down || e.repeat) return;
@@ -113,16 +159,19 @@ export class HidingController {
     } else if (e.code === 'KeyC') {
       this.debugOn = !this.debugOn;
       this.hud.setDebugVisible(this.debugOn);
-    } else if (e.code === 'Escape') this.stickyAim = false;
+    } else if (e.code === 'KeyK') this.hud.toggleLegend();
+    else if (e.code === 'KeyP') this.hud.togglePalette();
+    else if (e.code === 'Escape') this.aimOn = false;
     else {
       const m = /^(?:Digit|Numpad)([1-4])$/.exec(e.code);
       if (m) this.setPose(POSES[Number(m[1]) - 1]);
     }
   }
 
-  private toggleStickyAim(): void {
-    this.stickyAim = !this.stickyAim;
-    if (this.stickyAim) this.pointer.set(innerWidth / 2, innerHeight / 2);
+  private toggleAim(): void {
+    this.aimOn = !this.aimOn;
+    this.eDownAt = 0;
+    if (this.aimOn) this.pointer.set(innerWidth / 2, innerHeight / 2);
     this.sinceHover = 1;
   }
 
@@ -170,14 +219,17 @@ export class HidingController {
     if (d > REACH) return this.hud.toast(`Too far: ${d.toFixed(1)} m (reach ${REACH} m)`);
     if (this.cooling) return;
     this.paint(r);
-    this.stickyAim = false;
+    if (this.o.touch) this.aimOn = false; // on touch you need your thumb back for walking; on desktop it stays on for the next pick
   }
 
-  private paint(r: Reading): void {
+  private paint(r: { color: THREE.Color; label: string }): void {
     this.cooldownUntil = performance.now() + PAINT_COOLDOWN * 1000;
     const { player, fx, pos } = this.o;
     player.setZoneColor(this.zone, r.color);
     this.painted[this.zone] = true;
+    const hexKey = r.color.getHexString();
+    this.recent = [{ color: r.color.clone(), label: r.label }, ...this.recent.filter((c) => c.color.getHexString() !== hexKey)].slice(0, 8);
+    this.hud.setRecent(this.recent);
     this.camo.invalidate();
     const y = (SPLASH_Y[this.pose ?? ''] ?? [1.25, 0.6])[this.zone === 'top' ? 0 : 1];
     fx.paintSplash(this.torso.set(pos.x, pos.y + y, pos.z), r.color);
@@ -204,6 +256,7 @@ export class HidingController {
     const aiming = this.aiming;
     this.o.input.el.style.cursor = aiming ? 'crosshair' : '';
     this.reachRing.visible = aiming;
+    this.hitMarker.visible = false;
     if (aiming) {
       this.reachRing.position.set(pos.x, 0.06, pos.z);
       this.sinceHover += dt;
@@ -217,12 +270,17 @@ export class HidingController {
         this.torso.y += 1;
         valid = this.torso.distanceTo(this.hover.point) <= REACH;
       }
+      if (this.hover) {
+        this.hitMarker.position.copy(this.hover.point);
+        this.hitMarker.visible = true;
+        (this.hitMarker.material as THREE.MeshBasicMaterial).color.set(valid ? '#ffffff' : '#ff5a4a');
+      }
       this.hud.crosshair(true, this.pointer.x, this.pointer.y, valid, this.hover ? { color: this.hover.color, label: this.hover.label } : null, this.cooling);
     } else {
       this.hud.crosshair(false);
       this.hover = null;
     }
-    this.hud.setAiming(this.stickyAim);
+    this.hud.setAiming(aiming);
 
     // camo
     const style = player.style;
@@ -235,7 +293,7 @@ export class HidingController {
       running: f.speed > 3.5,
       yaw: this.poseYaw ?? f.yaw,
       position: pos,
-      eye: camera.position,
+      eye: this.o.eye?.() ?? camera.position,
       hairVisible: !hunt && style.hair !== 'bald',
       hatVisible: !hunt && style.hat !== 'none',
       accessoryVisible: !hunt && style.accessory !== 'none',
@@ -243,7 +301,7 @@ export class HidingController {
     this.hud.setScore(this.camo.display);
     this.hud.setZones(player.getZoneColor('top'), player.getZoneColor('bottom'), this.zone, this.painted);
     this.hud.setPose(this.pose);
-    if (this.debugOn) this.hud.setDebug(`${describeBreakdown(b)}\nhunt mode: ${hunt ? 'on' : 'off'}   viewer: camera (no seeker yet)`);
+    if (this.debugOn) this.hud.setDebug(`${describeBreakdown(b)}\nhunt mode: ${hunt ? 'on' : 'off'}   viewer: ${this.o.eye?.() ? "seeker's eye" : 'camera (no seeker)'}`);
 
     return { state: this.pose ?? 'idle', yaw: this.poseYaw };
   }

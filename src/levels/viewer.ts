@@ -8,8 +8,12 @@ import { mountAudioDebug } from '../audioDebug';
 import { createCharacter, type PlayerState } from '../character';
 import { Fx, applyPixelRatio } from '../fx';
 import { addCompoundLighting, createCompound } from './compound';
-import { Input, stepPlayer, type MoveInput } from './controller';
+import { Input, PLAYER_RADIUS, PlayerBody, RUN_SPEED, WALK_SPEED, type MoveInput } from './controller';
+import { Seeker } from '../seeker';
+import { Chickens } from './chickens';
 import { HidingController } from './hiding';
+import { Round, ROUND_CONFIG } from './round';
+import { createRoundHud } from './roundHud';
 import { TopDownCamera } from './topdown';
 
 const PLAYER_STYLE = { body: 'female', primaryColor: '#f4a300', secondaryColor: '#2b4c9b', skinColor: '#8d5524', hairColor: '#1b1b1b', hair: 'braids', hat: 'none', accessory: 'earrings' };
@@ -79,7 +83,20 @@ export async function startCompound(): Promise<void> {
 
   const input = new Input(renderer.domElement);
   const fx = new Fx(scene);
-  const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: coarse || q.has('buttons'), hunt: q.get('hunt') !== '0' });
+  const chickens = new Chickens(level.colliders);
+  scene.add(chickens.group);
+  let seeker: Seeker | null = null;
+  const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: coarse || q.has('buttons'), hunt: q.get('hunt') !== '0', eye: () => seeker?.eye ?? null });
+  const SEEKER_START = { x: 11, z: -1, yaw: -Math.PI / 2 };
+  if (q.get('seeker') !== '0') {
+    seeker = new Seeker(
+      { colliders: level.colliders, bounds: level.bounds, spots: level.hidingSpots.map((s) => ({ id: s.id, position: s.position, facing: s.facing })), blocked: (a, b) => hiding.probe.blocked(a, b) },
+      fx,
+      scene,
+    );
+    seeker.reset(SEEKER_START);
+    if (q.has('ai')) seeker.setDebug(true);
+  }
   if (q.has('autowalk')) {
     // loop around the yard: east along the north side, south, west, north
     const route: [number, number][] = [[-9, -4.5], [9, -4.5], [9, 3], [-9, 3]];
@@ -97,9 +114,9 @@ export async function startCompound(): Promise<void> {
 
   // --- HUD
   const hint = overlay('left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.85;text-align:center;pointer-events:none');
-  hint.textContent = coarse ? 'Drag to walk · Eyedropper then tap a surface to paint · tap for sound' : 'WASD walk, Shift run · hold E + click: eyedropper · Q zone · 1-4 poses · H hunt mode · C camo text · M spots';
+  hint.textContent = coarse ? 'Drag to walk · tap Eyedropper, then a surface, to paint' : ''; // on desktop the keycap card in the HUD says it all
   const stats = overlay('left:8px;bottom:8px;font:11px monospace;background:#0008;padding:4px 6px;border-radius:4px;display:none;pointer-events:none');
-  const spotList = overlay('left:8px;top:8px;max-width:340px;max-height:calc(100% - 60px);overflow:auto;background:#000b;padding:8px 10px;border-radius:6px;font:11px/1.5 monospace;display:none');
+  const spotList = overlay('left:8px;top:250px;max-width:340px;max-height:calc(100% - 300px);overflow:auto;background:#000b;padding:8px 10px;border-radius:6px;font:11px/1.5 monospace;display:none');
   spotList.innerHTML =
     '<b>Hiding spots (base colour read from userData.baseColor)</b><br>' +
     level.hidingSpots
@@ -115,6 +132,13 @@ export async function startCompound(): Promise<void> {
     if (e.code === 'KeyM') {
       markers = !markers;
       applyMarkers();
+    }
+  });
+  const aiText = overlay('left:74px;top:214px;font:11px/1.45 monospace;background:#000b;padding:6px 8px;border-radius:6px;display:none;pointer-events:none;white-space:pre');
+  addEventListener('keydown', (e) => {
+    if (e.code === 'KeyJ' && seeker) {
+      seeker.setDebug(!seeker.debug);
+      hiding.toast(seeker.debug ? 'AI debug on' : 'AI debug off');
     }
   });
   const showStats = q.has('stats');
@@ -133,6 +157,7 @@ export async function startCompound(): Promise<void> {
     soundOn = true;
     void audio.unlock().then(async () => {
       await audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01']);
+      round?.startChant();
       void audio.loop('amb_market', { volume: 0.22 });
       const g = level.generator;
       void audio.loop('amb_generator', { volume: 1, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
@@ -147,6 +172,7 @@ export async function startCompound(): Promise<void> {
   addEventListener('keydown', startSound, { once: true });
 
   // --- loop
+  const body = new PlayerBody(pos);
   let state: PlayerState = 'idle';
   player.play('idle', 0.01);
   let yaw = 0;
@@ -156,33 +182,94 @@ export async function startCompound(): Promise<void> {
   let fps = 0;
   loading.remove();
 
-  renderer.setAnimationLoop((now) => {
-    const rawDt = (now - last) / 1000;
-    const dt = Math.min(0.05, rawDt);
-    last = now;
+  let wasGrounded = true;
+  let firstRound = true;
+  const roundHud = createRoundHud();
+  const roundCfg = { ...ROUND_CONFIG, prepSeconds: Number(q.get('prep') ?? ROUND_CONFIG.prepSeconds), huntSeconds: Number(q.get('hunt_s') ?? ROUND_CONFIG.huntSeconds) };
+  const round =
+    q.get('round') === '0'
+      ? null
+      : new Round(
+          {
+            onPhase: (phase) => {
+              if (phase === 'prep') {
+                // a fresh round: back to the start (the first one starts where the URL says), the masquerade has its eyes covered
+                if (!firstRound) pos.copy(level.spawn);
+                firstRound = false;
+                body.vx = body.vz = body.vy = 0;
+                hiding.clearPose();
+                if (seeker) {
+                  seeker.blind = true;
+                  seeker.reset(SEEKER_START);
+                }
+              } else if (phase === 'hunt' && seeker) {
+                seeker.blind = false;
+                seeker.reset();
+              }
+            },
+          },
+          roundCfg,
+        );
+  round?.start();
+  const sense = { position: pos, speed: 0, landed: false, camo: 0, pose: null as string | null };
 
-    const move = stepPlayer(pos, input.read(), dt, level.colliders, level.bounds);
-    if (move.heading !== null) {
-      let d = move.heading - yaw;
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      yaw += d * Math.min(1, dt * 14);
-    }
-    const held = hiding.update(dt, { speed: move.speed, yaw });
-    if (held.yaw !== null) {
-      const d = Math.atan2(Math.sin(held.yaw - yaw), Math.cos(held.yaw - yaw));
-      yaw += d * Math.min(1, dt * 14);
-    }
-    const next: PlayerState = move.speed === 0 ? held.state : move.speed > 3.5 ? 'run' : 'walk';
+  /** Everything that moves, with no drawing: the animation loop calls this once a frame and the test helpers call it in fixed steps. */
+  function simulate(dt: number, extra?: Partial<MoveInput>) {
+    const frozen = round?.phase === 'lost';
+    const raw = frozen ? { x: 0, y: 0, run: false } : { ...input.read(), ...extra };
+    body.radius = hiding.pose === 'wall_flat' ? 0.2 : PLAYER_RADIUS; // pressed flat, you can stand right up against the wall
+    const res = body.update(raw, dt, level.colliders, level.bounds);
+    const turn = 1 - Math.exp(-dt * 16);
+    if (res.heading !== null) yaw += Math.atan2(Math.sin(res.heading - yaw), Math.cos(res.heading - yaw)) * turn;
+    const airborne = !res.grounded;
+    const landed = res.grounded && !wasGrounded;
+    wasGrounded = res.grounded;
+    const moving = res.speed > 0.35 || airborne;
+    const held = hiding.update(dt, { speed: moving ? Math.max(res.speed, airborne ? WALK_SPEED : 0) : 0, yaw });
+    if (held.yaw !== null) yaw += Math.atan2(Math.sin(held.yaw - yaw), Math.cos(held.yaw - yaw)) * turn;
+    const next: PlayerState = airborne ? 'jump' : res.speed > 0.35 ? (res.speed > 3.6 ? 'run' : 'walk') : held.state;
     if (next !== state) {
       state = next;
-      player.play(state, 0.2);
+      player.play(state, state === 'jump' ? 0.08 : 0.2);
     }
+    // keep the stride matched to the ground speed so feet don't skate
+    player.animator.speed = state === 'walk' ? Math.min(1.35, Math.max(0.5, res.speed / WALK_SPEED)) : state === 'run' ? Math.min(1.25, res.speed / RUN_SPEED) : 1;
     player.group.position.copy(pos);
     player.group.rotation.y = yaw;
     player.update(dt);
+
+    if (seeker) {
+      sense.speed = moving ? res.speed : 0;
+      sense.landed = landed;
+      sense.camo = hiding.camo.breakdown.total;
+      sense.pose = hiding.pose;
+      seeker.update(dt, sense);
+    }
+    round?.update(dt);
+    chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])]);
+    return res;
+  }
+
+  if (seeker) {
+    seeker.onCaught = () => {
+      fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.2, pos.z));
+      void audio.unlock().then(() => audio.playOnce('caught', { volume: 0.9 }));
+      round?.caught();
+    };
+  }
+
+  renderer.setAnimationLoop((now) => {
+    const rawDt = Math.max(0, (now - last) / 1000); // the first rAF timestamp can precede `last`: never run time backwards
+    const dt = Math.min(0.05, rawDt);
+    last = now;
+
+    const res = simulate(dt);
+    if (round) roundHud.update(round.phase, round.left, 1, round.phase === 'lost' ? 1 : 0);
+    if (seeker?.debug) aiText.textContent = seeker.describe(sense as never);
+    aiText.style.display = seeker?.debug ? 'block' : 'none';
     fx.update(dt, rig.camera, renderer);
 
-    if (!debugCam) rig.update(dt, pos);
+    if (!debugCam) rig.update(dt, pos, body.vx, body.vz);
     rig.fade(level.fadeGroups, pos, dt);
     lights.follow(pos);
     audio.setListener(pos.x, 1.2, pos.z, 0, 0, -1);
@@ -205,6 +292,19 @@ export async function startCompound(): Promise<void> {
       camera: rig.camera,
       audio,
       input,
+      body,
+      seeker,
+      round,
+      sim(seconds: number, until?: () => boolean) {
+        // runs the real per-frame logic (player, camo, seeker, chickens) in fixed 1/30 s steps; returns the seconds it ran
+        let t = 0;
+        for (; t < seconds; t += 1 / 30) {
+          simulate(1 / 30);
+          if (until?.()) break;
+        }
+        return +t.toFixed(2);
+      },
+      chickens,
       hiding,
       player,
       /** Test helper: put the follow camera on the player immediately. */
@@ -219,8 +319,17 @@ export async function startCompound(): Promise<void> {
       },
       /** Test helper: walks `seconds` of game time in direction (x, y on screen) at 30 steps per second, ignoring the frame rate. */
       walk(x: number, y: number, seconds: number, run = false) {
-        for (let i = 0; i < seconds * 30; i++) stepPlayer(pos, { x, y, run }, 1 / 30, level.colliders, level.bounds);
-        return { x: +pos.x.toFixed(2), z: +pos.z.toFixed(2) };
+        for (let i = 0; i < seconds * 30; i++) body.update({ x, y, run }, 1 / 30, level.colliders, level.bounds);
+        return { x: +pos.x.toFixed(2), y: +pos.y.toFixed(2), z: +pos.z.toFixed(2) };
+      },
+      /** Test helper: press jump, then run `seconds` of physics steps in direction (x, y). */
+      jump(x: number, y: number, seconds: number, run = false) {
+        let peak = pos.y;
+        for (let i = 0; i < seconds * 30; i++) {
+          body.update({ x, y, run, jump: i === 0 }, 1 / 30, level.colliders, level.bounds);
+          peak = Math.max(peak, pos.y);
+        }
+        return { x: +pos.x.toFixed(2), y: +pos.y.toFixed(2), z: +pos.z.toFixed(2), peak: +peak.toFixed(2) };
       },
       level,
       get fps() {

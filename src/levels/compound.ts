@@ -106,6 +106,7 @@ function decal(tex: THREE.Texture, w: number, h: number, x: number, y: number, z
   m.position.set(x, y, z);
   m.rotation.y = ry;
   m.receiveShadow = true;
+  m.userData.decal = true;
   return m;
 }
 
@@ -320,7 +321,7 @@ export async function createCompound(): Promise<Compound> {
     for (const y of [0.28, 0.62]) cy(props, m, 0, y, 0, 0.318, 0.318, 0.05, '#163f8a', 12);
     cy(props, m, 0, 0.95, 0, 0.26, 0.26, 0.04, '#3a76d6', 12);
     cy(props, m, 0.11, 0.99, 0.05, 0.04, 0.04, 0.05, '#f0f0ea', 6);
-    colliders.push(circle(x, z, 0.32));
+    colliders.push(circle(x, z, 0.32, 0.95, true)); // stand on top of a drum
   };
   const drumCluster = (id: string, label: string, cx: number, cz: number, offsets: [number, number][]) => {
     offsets.forEach(([ox, oz], i) => drum(cx + ox, cz + oz, i === 1 ? '#1a4aa0' : DRUM));
@@ -337,7 +338,7 @@ export async function createCompound(): Promise<Compound> {
     const m = place(x, 0, z);
     cy(props, m, 0, 0, 0, 0.3, 0.4, 0.17, c, 14);
     cy(props, m, 0, 0.15, 0, 0.34, 0.34, 0.03, '#2b2b2b', 14);
-    colliders.push(circle(x, z, 0.38));
+    colliders.push(circle(x, z, 0.38, 0.17, true));
   }
 
   // white plastic chairs
@@ -365,7 +366,7 @@ export async function createCompound(): Promise<Compound> {
   bx(props, genM, 0.53, 0.52, 0.1, 0.03, 0.08, 0.08, '#7bd36b');
   cy(props, genM, -0.35, 0.74, -0.36, 0.04, 0.04, 0.6, '#2b2b2d', 6);
   for (const [gx, gz] of [[-0.5, -0.36], [0.5, -0.36], [-0.5, 0.36], [0.5, 0.36]] as const) cy(props, genM, gx, 0.12, gz, 0.02, 0.02, 0.9, '#3a3a3c', 5);
-  colliders.push(box(-13.85, 4.1, -12.55, 5.1));
+  colliders.push(box(-13.85, 4.1, -12.55, 5.1, false, 1.05, true));
   surf('generator', 'Diesel generator', 'generator', [-13.2, 0.5, 4.6], [1.3, 1.1, 0.95], [1, 0, 0], props.baseOf('#d2492e'));
   const generatorPos = new THREE.Vector3(-13.2, 0.6, 4.6);
 
@@ -390,13 +391,152 @@ export async function createCompound(): Promise<Compound> {
   const benchM = place(-4.5, 0, 8.35);
   bx(wood, benchM, 0, 0.45, 0, 2.2, 0.06, 0.45, '#8a5a32');
   for (const lx of [-0.95, 0.95]) bx(wood, benchM, lx, 0.22, 0, 0.08, 0.44, 0.38, '#6e4526');
-  colliders.push(box(-5.6, 8.1, -3.4, 8.6));
+  colliders.push(box(-5.6, 8.1, -3.4, 8.6, false, 0.5, true));
   surf('bench', 'Wooden bench', 'bench', [-4.5, 0.3, 8.35], [2.2, 0.6, 0.45], [0, 0, 1], wood.baseOf('#8a5a32'));
   const tableM = place(5.0, 0, -8.0);
   bx(wood, tableM, 0, 0.74, 0, 1.4, 0.06, 0.8, '#7d5030');
   for (const [lx, lz] of [[-0.62, -0.33], [0.62, -0.33], [-0.62, 0.33], [0.62, 0.33]] as const) bx(wood, tableM, lx, 0.37, lz, 0.07, 0.74, 0.07, '#5f3b20');
-  colliders.push(box(4.3, -8.4, 5.7, -7.6));
+  colliders.push(box(4.3, -8.4, 5.7, -7.6, false, 0.77, true));
   surf('table', 'Wooden table', 'table', [5.0, 0.4, -8.0], [1.4, 0.8, 0.8], [0, 0, 1], wood.baseOf('#7d5030'));
+
+  // ---------------------------------------------------------------- more things to hide on (each registers a surface and a collider; climbable ones have a top height)
+  const TAU = Math.PI * 2;
+  const rnd = rng(77);
+  // sacks piled against the north facade
+  const SACK = '#d6c7a0';
+  const sack = (x: number, y: number, z: number, ry: number, color = SACK) => {
+    const g = new THREE.SphereGeometry(0.5, 8, 6);
+    g.scale(0.72, 0.3, 0.5);
+    props.add(g, place(x, y, z, ry), color);
+  };
+  for (const [x, y, z, ry, c] of [[-0.55, 0.15, -8.1, 0.1, SACK], [0.02, 0.15, -8.06, -0.15, '#a8402f'], [0.57, 0.15, -8.12, 0.2, SACK], [-0.27, 0.42, -8.08, 0.05, '#4b7a45'], [0.28, 0.42, -8.1, -0.1, SACK], [0, 0.69, -8.09, 0.2, SACK]] as const) sack(x, y, z, ry, c);
+  colliders.push(box(-0.95, -8.45, 0.95, -7.75, false, 0.82, true));
+  surf('sacks', 'Pile of sacks', 'sacks', [0, 0.45, -8.1], [1.9, 0.9, 0.7], [0, 0, 1], props.baseOf(SACK));
+
+  // stacked tyres by the gate
+  const TYRE = '#1d1d20';
+  for (let i = 0; i < 4; i++) props.add(new THREE.TorusGeometry(0.26, 0.09, 6, 12), place(12.9, 0.09 + i * 0.18, -3.5, i * 0.5, Math.PI / 2), TYRE);
+  props.add(new THREE.TorusGeometry(0.26, 0.09, 6, 12), place(12.2, 0.09, -3.95, 0.3, Math.PI / 2), TYRE);
+  colliders.push(circle(12.9, -3.5, 0.38, 0.76, true), circle(12.2, -3.95, 0.36, 0.18, true));
+  surf('tyres', 'Stack of tyres', 'tyres', [12.9, 0.4, -3.5], [0.8, 0.8, 0.8], [-1, 0, 0], props.baseOf(TYRE));
+
+  // gas cylinders against the south wall
+  const gas = (x: number, z: number, color: string) => {
+    props.add(new THREE.CylinderGeometry(0.17, 0.17, 0.05, 10), place(x, 0.025, z), '#2b2b2b');
+    props.add(new THREE.CylinderGeometry(0.16, 0.16, 0.46, 10), place(x, 0.28, z), color);
+    props.add(new THREE.SphereGeometry(0.16, 10, 5, 0, TAU, 0, Math.PI / 2), place(x, 0.51, z), color);
+    props.add(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 6), place(x, 0.7, z), '#d9b34a');
+  };
+  for (const [x, z, c] of [[-13.6, 8.2, '#c0291f'], [-13.05, 8.35, '#2f7d3a'], [-13.3, 7.8, '#c0291f']] as const) gas(x, z, c);
+  colliders.push(box(-13.9, 7.5, -12.75, 8.6, false, 0.66, true));
+  surf('gas', 'Gas cylinders', 'gas', [-13.3, 0.35, 8.1], [1.2, 0.7, 1.1], [0, 0, -1], props.baseOf('#c0291f'));
+
+  // market stall: table with ankara bolts, and a striped umbrella that fades when it is between the camera and you
+  const stall = place(3.4, 0, -3.4);
+  bx(wood, stall, 0, 0.76, 0, 1.7, 0.06, 0.8, '#8a5a32');
+  for (const [lx, lz] of [[-0.78, -0.33], [0.78, -0.33], [-0.78, 0.33], [0.78, 0.33]] as const) bx(wood, stall, lx, 0.38, lz, 0.06, 0.76, 0.06, '#5f3b20');
+  const bolts = ['#d13b2e', '#f1c232', '#2a5db0', '#2f9d57', '#e2762c', '#7b3fa0', '#f4a8c0', '#17a2a8'];
+  bolts.forEach((c, i) => bx(props, stall, -0.62 + (i % 4) * 0.42, 0.86 + Math.floor(i / 4) * 0.15, (i % 2) * 0.1 - 0.05, 0.38, 0.14, 0.3, c));
+  props.add(new THREE.CylinderGeometry(0.03, 0.03, 2.3, 6), place(3.4, 1.15, -3.4), '#3a3a38');
+  colliders.push(box(2.55, -3.8, 4.25, -3.0, false, 0.8, true));
+  surf('stall_fabric', 'Market stall (ankara bolts)', 'fabric', [3.4, 0.95, -3.4], [1.7, 0.5, 0.8], [0, 0, 1], props.baseOf('#d13b2e'));
+  const umbrellaFade = new FadeGroup('umbrella');
+  fadeGroups.push(umbrellaFade);
+  const umbrella = new StaticBatch('umbrella', null, { fade: umbrellaFade, doubleSide: true });
+  const wedgeColors = ['#d13b2e', '#f1c232'];
+  for (let i = 0; i < 8; i++) umbrella.add(new THREE.CylinderGeometry(0.03, 1.4, 0.45, 3, 1, true, (i * TAU) / 8, TAU / 8), place(3.4, 2.3, -3.4), wedgeColors[i % 2]);
+  addMesh(umbrella.build());
+  surf('umbrella', 'Market umbrella', 'canopy', [3.4, 2.3, -3.4], [2.8, 0.5, 2.8], [0, -1, 0], umbrella.baseOf('#d13b2e'));
+
+  // hollow-block steps against the south veranda wall: 0.4, 0.8 and 1.2 m, each a walkable step up from the last
+  const BLOCK = '#9b9a93';
+  for (const [z0, z1, h] of [[6.95, 7.4, 0.4], [7.4, 7.85, 0.8], [7.85, 8.3, 1.2]] as const) {
+    props.span(10.0, 0, z0, 11.4, h, z1, BLOCK);
+    colliders.push(box(10.0, z0, 11.4, z1, false, h, true));
+  }
+  surf('block_steps', 'Hollow-block steps', 'blocks', [10.7, 0.6, 7.6], [1.4, 1.2, 1.35], [0, 0, -1], props.baseOf(BLOCK));
+
+  // water tank on a steel stand
+  const tankM = place(14.0, 0, 7.4);
+  for (const [lx, lz] of [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]] as const) cy(props, tankM, lx, 0, lz, 0.045, 0.045, 1.32, '#4a4d52', 6);
+  bx(props, tankM, 0, 1.36, 0, 1.0, 0.08, 1.0, '#4a4d52');
+  cy(props, tankM, 0, 1.4, 0, 0.5, 0.48, 0.95, '#25282b', 14);
+  props.add(new THREE.SphereGeometry(0.48, 14, 5, 0, TAU, 0, Math.PI / 2), tankM.clone().multiply(place(0, 2.35, 0)), '#2f3235');
+  colliders.push(circle(14.0, 7.4, 0.6));
+  surf('water_tank', 'Black water tank on a stand', 'tank', [14.0, 1.4, 7.4], [1.1, 2.8, 1.1], [-1, 0, 0], props.baseOf('#25282b'));
+
+  // firewood stacked against the west wall, north of the sign wall
+  const WOOD1 = '#6a4a2c';
+  const WOOD2 = '#7d5a36';
+  [[-14.38, 0.1, 0], [-14.14, 0.1, 0], [-13.9, 0.1, 0], [-14.26, 0.29, 0], [-14.02, 0.29, 0], [-14.14, 0.48, 0]].forEach(([x, y], i) => {
+    for (let k = 0; k < 2; k++) props.add(new THREE.CylinderGeometry(0.1, 0.1, 0.55, 7), place(x, y, -4.45 + k * 0.52 + (rnd() - 0.5) * 0.04, 0, Math.PI / 2), (i + k) % 2 ? WOOD1 : WOOD2);
+  });
+  colliders.push(box(-14.65, -4.75, -13.75, -3.9, false, 0.62, true));
+  surf('firewood', 'Firewood stack', 'firewood', [-14.2, 0.3, -4.2], [0.9, 0.65, 1.0], [1, 0, 0], props.baseOf(WOOD1));
+
+  // an okada (motorbike) parked in the open yard
+  const OKADA = '#b8321f';
+  const bike = place(-1.5, 0, -3.3);
+  for (const wx of [-0.7, 0.7]) {
+    props.add(new THREE.TorusGeometry(0.26, 0.07, 6, 14), bike.clone().multiply(place(wx, 0.33, 0)), '#1d1d20');
+    cy(props, bike, wx, 0.28, -0.05, 0.07, 0.07, 0.1, '#9a9a9a', 8);
+  }
+  bx(props, bike, 0.0, 0.42, 0, 1.0, 0.07, 0.1, '#7d2417');
+  bx(props, bike, 0.2, 0.64, 0, 0.42, 0.2, 0.3, OKADA);
+  bx(props, bike, -0.32, 0.66, 0, 0.62, 0.1, 0.28, '#1f1f22');
+  bx(props, bike, 0.05, 0.3, 0, 0.3, 0.24, 0.22, '#6b6b6b');
+  bx(props, bike, 0.62, 0.58, 0, 0.05, 0.62, 0.08, '#4a4a4a', 0, -0.32);
+  bx(props, bike, 0.54, 0.88, 0, 0.06, 0.05, 0.55, '#2a2a2a');
+  props.add(new THREE.SphereGeometry(0.09, 8, 6), bike.clone().multiply(place(0.7, 0.8, 0)), '#f3e7a3');
+  cy(props, bike, -0.4, 0.24, 0.16, 0.035, 0.03, 0.55, '#555', 6);
+  colliders.push(box(-2.45, -3.55, -0.55, -3.05, false, 0.95, true));
+  surf('okada', 'Okada (red motorbike)', 'bike', [-1.5, 0.5, -3.3], [1.9, 1.0, 0.45], [0, 0, 1], props.baseOf(OKADA));
+
+
+  // ---------------------------------------------------------------- a container shop you can walk into and hide inside
+  const CONT = '#2e7d5b';
+  const contFade = new FadeGroup('container');
+  fadeGroups.push(contFade);
+  const cont = new StaticBatch('container', T.rusty_metal, { texel: 1.5, fade: contFade, doubleSide: true });
+  cont.add(corrugatedSheet(3.2, 2.4, 14), place(7.2, 1.25, -1.0, Math.PI), CONT); // north wall (outside faces -z)
+  cont.add(corrugatedSheet(3.2, 2.4, 14), place(7.2, 1.25, 1.4, 0), CONT); // south wall
+  cont.add(corrugatedSheet(2.4, 2.4, 10), place(8.8, 1.25, 0.2, Math.PI / 2), CONT); // closed east end
+  cont.add(corrugatedSheet(3.4, 2.6, 15), place(7.2, 2.5, 0.2, 0, -Math.PI / 2), '#2a6a4d'); // roof
+  cont.add(corrugatedSheet(1.2, 2.3, 6), place(5.0, 1.2, -1.07, Math.PI), '#2a5db0'); // the two doors, swung open against the sides
+  cont.add(corrugatedSheet(1.2, 2.3, 6), place(5.0, 1.2, 1.47, 0), '#2a5db0');
+  cont.add(new THREE.BoxGeometry(0.12, 2.5, 0.12), place(5.6, 1.25, -0.98), '#23272b'); // door frame posts and lintel
+  cont.add(new THREE.BoxGeometry(0.12, 2.5, 0.12), place(5.6, 1.25, 1.38), '#23272b');
+  cont.add(new THREE.BoxGeometry(0.14, 0.14, 2.5), place(5.6, 2.45, 0.2), '#23272b');
+  addMesh(cont.build());
+  bx(wood, place(7.2, 0, 0.2), 0, 0.05, 0, 3.0, 0.1, 2.3, '#7a5a38'); // raised plank floor: a 10 cm step
+  colliders.push(box(5.5, -1.1, 8.9, -0.97, true), box(5.5, 1.34, 8.9, 1.47, true), box(8.77, -1.1, 8.9, 1.47, true), box(4.4, -1.15, 5.6, -0.99, true), box(4.4, 1.38, 5.6, 1.52, true), box(5.7, -0.9, 8.7, 1.3, false, 0.1, true));
+  // inside: a bottle-crate stack and two sacks in the back corner to tuck in behind
+  for (const [cx, cz, h, c] of [[8.35, -0.55, 0.3, '#e8b520'], [8.35, -0.55, 0.6, '#c0291f']] as const) props.span(cx - 0.3, 0.1 + (h - 0.3), cz - 0.22, cx + 0.3, 0.1 + h, cz + 0.22, c);
+  sack(8.3, 0.25, 0.85, 0.3);
+  sack(8.28, 0.5, 0.82, -0.2, '#a8402f');
+  colliders.push(box(8.03, -0.77, 8.67, -0.33, false, 0.7, true), circle(8.3, 0.85, 0.34, 0.65, true));
+  surf('container_north', 'Container shop, outer wall', 'container', [7.2, 1.25, -1.0], [3.2, 2.4, 0.2], [0, 0, -1], cont.baseOf(CONT));
+  surf('container_south', 'Container shop, outer wall', 'container', [7.2, 1.25, 1.4], [3.2, 2.4, 0.2], [0, 0, 1], cont.baseOf(CONT));
+  surf('container_inside', 'Container shop, inner back wall', 'container', [8.7, 1.25, 0.2], [0.2, 2.4, 2.3], [-1, 0, 0], cont.baseOf(CONT));
+  surf('container_doors', 'Container doors (blue)', 'container', [5.0, 1.2, -1.07], [1.2, 2.3, 0.2], [0, 0, -1], cont.baseOf('#2a5db0'));
+
+  // more things to climb: bottle-crate stairs, a concrete planter, and cement bags on a pallet
+  for (const [i, h, c] of [[0, 0.3, '#e8b520'], [1, 0.6, '#c0291f'], [2, 0.9, '#e8b520']] as const) {
+    const x0 = -5.6 + i * 0.55;
+    props.span(x0, 0, 3.2, x0 + 0.55, h, 3.75, c);
+    props.span(x0 + 0.05, h, 3.25, x0 + 0.5, h + 0.015, 3.7, '#6f5410');
+    colliders.push(box(x0, 3.2, x0 + 0.55, 3.75, false, h, true));
+  }
+  surf('crate_stairs', 'Crate stairs', 'crates', [-4.8, 0.45, 3.5], [1.65, 0.9, 0.55], [0, 0, 1], props.baseOf('#e8b520'));
+  props.span(-9.8, 0, 5.9, -6.8, 0.85, 6.5, '#a9a79f');
+  props.span(-9.7, 0.85, 5.95, -6.9, 0.92, 6.45, '#4e6b34');
+  colliders.push(box(-9.8, 5.9, -6.8, 6.5, false, 0.85, true));
+  surf('planter', 'Concrete planter', 'planter', [-8.3, 0.45, 6.2], [3.0, 0.9, 0.6], [0, 0, -1], props.baseOf('#a9a79f'));
+  bx(wood, place(-10.0, 0, 3.4), 0, 0.075, 0, 1.2, 0.15, 1.0, '#8a6a42');
+  for (let l = 0; l < 4; l++) for (const [ox, oz] of [[-0.28, -0.2], [0.28, -0.2], [-0.28, 0.2], [0.28, 0.2]] as const) bx(props, place(-10.0 + (l % 2) * 0.03, 0, 3.4, l * 0.5), ox, 0.21 + l * 0.12, oz, 0.5, 0.12, 0.33, l % 2 ? '#b8b2a4' : '#a39d90');
+  colliders.push(box(-10.6, 2.9, -9.4, 3.9, false, 0.66, true));
+  surf('cement_bags', 'Cement bags on a pallet', 'sacks', [-10.0, 0.4, 3.4], [1.2, 0.8, 1.0], [0, 0, -1], props.baseOf('#b8b2a4'));
+
   addMesh(props.build());
   addMesh(wood.build());
 
@@ -426,7 +566,8 @@ export async function createCompound(): Promise<Compound> {
   ];
   instanced('surv_box', crateP);
   instanced('surv_box-large', [{ x: 14.1, z: -6.9, ry: 1.2, s: 3.4 }]);
-  colliders.push(box(11.9, -8.5, 13.9, -7.5), circle(14.1, -6.9, 0.6));
+  // two crates on the floor (climbable, 0.85 m) with a third stacked on top (1.71 m: jump from the first level)
+  colliders.push(box(11.95, -8.45, 12.85, -7.55, false, 0.85, true), box(12.95, -8.5, 13.85, -7.6, false, 0.85, true), box(12.45, -8.45, 13.35, -7.55, false, 1.71, true), circle(14.1, -6.9, 0.6, 0.85, true));
   surf('crates', 'Stacked crates', 'crates', [13.0, 0.6, -7.9], [2.4, 1.3, 1.1], [0, 0, 1], propBaseColor(models['surv_box'][0]));
 
   // buckets, traffic cones
@@ -437,7 +578,7 @@ export async function createCompound(): Promise<Compound> {
     { x: 12.5, z: 7.9, s: 2.3, tint: '#3da35a' },
   ];
   instanced('surv_bucket', bucketP);
-  bucketP.forEach((p) => colliders.push(circle(p.x, p.z, 0.2)));
+  bucketP.forEach((p) => colliders.push(circle(p.x, p.z, 0.2, 0.44, true)));
   const coneP: Placement[] = [{ x: 8.0, z: 3.1 }, { x: 8.3, z: 6.0 }, { x: 13.7, z: -3.4 }];
   instanced('car_cone', coneP);
   coneP.forEach((p) => colliders.push(circle(p.x, p.z, 0.22)));
@@ -503,6 +644,18 @@ export async function createCompound(): Promise<Compound> {
     { id: 'bench', label: 'Wooden bench on the south veranda', shape: 'low bench', at: V(-4.5, 7.6), facing: dir(0, 1) },
     { id: 'sheets', label: 'Rusty zinc sheets leaning on the wall', shape: 'leaning slabs', at: V(0, 7.9), facing: dir(0, 1) },
     { id: 'crates', label: 'Stacked crates', shape: 'stepped boxes', at: V(12.9, -6.9), facing: dir(0, -1) },
+    { id: 'container', label: 'Inside the container shop', shape: 'enclosed box, one open side', at: V(8.3, 0.2), facing: dir(1, 0), probeY: 1.0 },
+    { id: 'crate_stairs', label: 'Bottle-crate stairs (climbable)', shape: 'stepped crates', at: V(-4.8, 2.55), facing: dir(0, 1), probeY: 0.4 },
+    { id: 'planter', label: 'Concrete planter (climbable)', shape: 'long low wall', at: V(-8.3, 5.2), facing: dir(0, 1), probeY: 0.5 },
+    { id: 'cement_bags', label: 'Cement bags on a pallet (climbable)', shape: 'grey pile', at: V(-10.0, 2.5), facing: dir(0, 1), probeY: 0.4 },
+    { id: 'sacks', label: 'Pile of sacks', shape: 'soft pile', at: V(0, -7.25), facing: dir(0, -1) },
+    { id: 'tyres', label: 'Stack of tyres', shape: 'black stack', at: V(11.85, -3.4), facing: dir(1, 0) },
+    { id: 'gas', label: 'Gas cylinders', shape: 'round cluster, low', at: V(-13.3, 7.0), facing: dir(0, 1) },
+    { id: 'stall_fabric', label: 'Market stall with ankara bolts', shape: 'multicolour table', at: V(3.4, -2.6), facing: dir(0, -1), probeY: 0.9 },
+    { id: 'block_steps', label: 'Hollow-block steps (climbable)', shape: 'stepped blocks', at: V(10.7, 6.45), facing: dir(0, 1), probeY: 0.4 },
+    { id: 'water_tank', label: 'Water tank on a stand', shape: 'tall cylinder', at: V(13.1, 7.4), facing: dir(1, 0), probeY: 1.6 },
+    { id: 'firewood', label: 'Firewood stack', shape: 'low log pile', at: V(-13.1, -4.2), facing: dir(-1, 0), probeY: 0.4 },
+    { id: 'okada', label: 'Okada (motorbike)', shape: 'low vehicle', at: V(-1.5, -2.45), facing: dir(0, -1), probeY: 0.5 },
     { id: 'north_wall', label: 'Turquoise band under the north veranda', shape: 'flat wall band', at: V(-12.5, -8.5), facing: dir(0, -1) },
   ];
   function zAtNorth(d: number) {
@@ -572,8 +725,14 @@ export function addCompoundLighting(scene: THREE.Scene, shadowMapSize: number) {
     sun,
     /** Keep the shadow box centred on the player (snapped so shadow edges don't shimmer). */
     follow(p: THREE.Vector3) {
-      const snap = (v: number) => Math.round(v / 0.5) * 0.5;
-      sun.target.position.set(snap(p.x), 0, snap(p.z));
+      // snap the shadow box to whole shadow-map texels in light space, so shadow edges don't swim as the player walks
+      const texel = 34 / shadowMapSize;
+      const right = new THREE.Vector3(0, 1, 0).cross(toSun).normalize();
+      const up = new THREE.Vector3().crossVectors(toSun, right);
+      const sx = Math.round((p.x * right.x + p.z * right.z) / texel) * texel;
+      const sy = Math.round((p.x * up.x + p.y * up.y + p.z * up.z) / texel) * texel;
+      const depth = p.x * toSun.x + p.y * toSun.y + p.z * toSun.z;
+      sun.target.position.copy(right).multiplyScalar(sx).addScaledVector(up, sy).addScaledVector(toSun, depth);
       sun.position.copy(sun.target.position).addScaledVector(toSun, 60);
     },
   };

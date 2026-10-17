@@ -1,11 +1,55 @@
-// Walking controller: WASD / arrows (Shift runs) or a touch / mouse drag acting as a floating joystick,
-// with circle-vs-box/circle collisions that slide along walls. Screen up is world -z (the camera never turns).
+// Walking controller: WASD / arrows (Shift runs, Space jumps) or a touch / mouse drag acting as a floating joystick, with smoothed
+// acceleration, circle-vs-box/circle collisions that slide along walls, and climbable props (step up onto low ones, jump onto taller ones).
+// Screen up is world -z (the camera never turns).
 import * as THREE from 'three';
 
-/** `wall` marks boxes a player can press their back against (building walls, fences, the danfo's flank), as opposed to furniture. */
-export type Collider = { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number; wall: boolean } | { kind: 'circle'; x: number; z: number; r: number };
+/**
+ * `wall` marks boxes a player can press their back against (building walls, fences, the danfo's flank), as opposed to furniture.
+ * `climb` marks props the player can stand on: they are solid only while the player's feet are more than STEP_UP below `top`.
+ */
+export type Collider =
+  | { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number; wall: boolean; top: number; climb: boolean }
+  | { kind: 'circle'; x: number; z: number; r: number; top: number; climb: boolean };
 
-export const box = (x0: number, z0: number, x1: number, z1: number, wall = false): Collider => ({ kind: 'box', minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), wall });
+export const box = (x0: number, z0: number, x1: number, z1: number, wall = false, top = Infinity, climb = false): Collider => ({
+  kind: 'box',
+  minX: Math.min(x0, x1),
+  maxX: Math.max(x0, x1),
+  minZ: Math.min(z0, z1),
+  maxZ: Math.max(z0, z1),
+  wall,
+  top,
+  climb,
+});
+export const circle = (x: number, z: number, r: number, top = Infinity, climb = false): Collider => ({ kind: 'circle', x, z, r, top, climb });
+
+export const WALK_SPEED = 2.8;
+export const RUN_SPEED = 4.8;
+export const PLAYER_RADIUS = 0.3;
+/** Highest ledge the player walks up onto without jumping (m). */
+export const STEP_UP = 0.55;
+const GRAVITY = 22;
+const JUMP_VELOCITY = 7; // apex about 1.1 m, so with STEP_UP a jump reaches ledges up to about 1.6 m
+const COYOTE = 0.1; // s after walking off a ledge in which a jump still works
+const JUMP_BUFFER = 0.12; // s before landing in which a jump press is remembered
+const ACCEL = 13; // 1/s: how quickly velocity follows the input on the ground
+const BRAKE = 16;
+const AIR_CONTROL = 3.5;
+
+/** Whether a collider blocks a player whose feet are at height `y`. */
+const solid = (c: Collider, y: number) => !c.climb || y + STEP_UP < c.top;
+
+/** Height of the highest climbable prop under a point that the player can stand on from height `y` (0 = the floor). */
+export function groundAt(x: number, z: number, y: number, colliders: readonly Collider[]): number {
+  let best = 0;
+  const m = 0.12; // a prop still holds you when your centre is just past its edge
+  for (const c of colliders) {
+    if (!c.climb || c.top > y + STEP_UP + 1e-3 || c.top <= best) continue;
+    const inside = c.kind === 'box' ? x >= c.minX - m && x <= c.maxX + m && z >= c.minZ - m && z <= c.maxZ + m : Math.hypot(x - c.x, z - c.z) <= c.r + m;
+    if (inside) best = c.top;
+  }
+  return best;
+}
 
 /** Nearest wall box to a point on the ground plane: how far its face is and the unit normal pointing from the wall towards the point. */
 export function nearestWall(p: { x: number; z: number }, maxDistance: number, colliders: readonly Collider[]): { distance: number; normal: { x: number; z: number }; point: { x: number; z: number } } | null {
@@ -23,14 +67,14 @@ export function nearestWall(p: { x: number; z: number }, maxDistance: number, co
   }
   return best;
 }
-export const circle = (x: number, z: number, r: number): Collider => ({ kind: 'circle', x, z, r });
 
 /** Push a circle at (p.x, p.z) out of every collider it overlaps. Returns true if it moved. */
-export function resolveCollisions(p: { x: number; z: number }, radius: number, colliders: readonly Collider[]): boolean {
+export function resolveCollisions(p: { x: number; z: number }, radius: number, colliders: readonly Collider[], y = 0): boolean {
   let moved = false;
   for (let pass = 0; pass < 3; pass++) {
     let any = false;
     for (const c of colliders) {
+      if (!solid(c, y)) continue;
       if (c.kind === 'box') {
         const nx = Math.min(c.maxX, Math.max(c.minX, p.x));
         const nz = Math.min(c.maxZ, Math.max(c.minZ, p.z));
@@ -77,6 +121,8 @@ export interface MoveInput {
   x: number;
   y: number;
   run: boolean;
+  /** True on the frame a jump was pressed. */
+  jump?: boolean;
 }
 
 /** Reads keyboard and pointer drags. Call `read()` once per frame. */
@@ -89,11 +135,20 @@ export class Input {
   override: MoveInput | null = null;
   /** While this returns true, pointer drags don't steer (e.g. the eyedropper is using the pointer). */
   blocked: (() => boolean) | null = null;
+  private jumpQueued = false;
+  /** Press jump from a UI button. */
+  queueJump(): void {
+    this.jumpQueued = true;
+  }
   static readonly STICK_RADIUS = 64;
 
   constructor(readonly el: HTMLElement) {
     addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (!e.repeat) this.jumpQueued = true;
+      }
       this.keys.add(e.code);
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -156,7 +211,16 @@ export class Input {
   }
 
   read(): MoveInput {
-    if (this.override) return this.override;
+    const m = this.readMove();
+    if (this.jumpQueued) {
+      this.jumpQueued = false;
+      m.jump = true;
+    }
+    return m;
+  }
+
+  private readMove(): MoveInput {
+    if (this.override) return { ...this.override };
     let x = 0;
     let y = 0;
     const k = this.keys;
@@ -174,9 +238,11 @@ export class Input {
       const dx = p.x - p.ox;
       const dy = p.y - p.oy;
       const len = Math.hypot(dx, dy);
-      if (len > 10) {
-        const m = Math.min(1, len / Input.STICK_RADIUS);
-        run = m > 0.8;
+      if (len > 8) {
+        // dead zone, then a gentle response curve so small drags walk slowly and a full drag runs
+        const raw = Math.min(1, (len - 8) / (Input.STICK_RADIUS - 8));
+        const m = raw ** 1.25;
+        run = raw > 0.85;
         return { x: (dx / len) * m, y: (dy / len) * m, run };
       }
     }
@@ -184,27 +250,106 @@ export class Input {
   }
 }
 
-export const WALK_SPEED = 2.8;
-export const RUN_SPEED = 4.8;
-export const PLAYER_RADIUS = 0.3;
 
-/** Moves `pos` by the input for one frame (sub-stepped so fast frames can't tunnel through thin walls). */
-export function stepPlayer(pos: THREE.Vector3, input: MoveInput, dt: number, colliders: readonly Collider[], bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): { speed: number; heading: number | null } {
-  const mag = Math.min(1, Math.hypot(input.x, input.y));
-  if (mag < 0.01) return { speed: 0, heading: null };
-  const speed = (input.run ? RUN_SPEED : WALK_SPEED) * (input.run ? 1 : Math.max(0.5, mag));
-  const dx = (input.x / Math.hypot(input.x, input.y)) * speed;
-  const dz = (input.y / Math.hypot(input.x, input.y)) * speed;
-  const steps = Math.max(1, Math.ceil((speed * dt) / 0.12));
-  const p = { x: pos.x, z: pos.z };
-  for (let i = 0; i < steps; i++) {
-    p.x += (dx * dt) / steps;
-    p.z += (dz * dt) / steps;
-    resolveCollisions(p, PLAYER_RADIUS, colliders);
-    p.x = Math.min(bounds.maxX, Math.max(bounds.minX, p.x));
-    p.z = Math.min(bounds.maxZ, Math.max(bounds.minZ, p.z));
+export interface StepResult {
+  /** Planar speed (m/s). */
+  speed: number;
+  /** Direction the player is steering (yaw, forward = +z), or null when idle. */
+  heading: number | null;
+  grounded: boolean;
+  /** Vertical velocity (m/s). */
+  vy: number;
+}
+
+/** The player's physical body: position, smoothed velocity, jumping and climbing. */
+export class PlayerBody {
+  readonly pos: THREE.Vector3;
+  vx = 0;
+  vz = 0;
+  vy = 0;
+  grounded = true;
+  /** Collision radius; the viewer shrinks it while the player is pressed flat against a wall. */
+  radius = PLAYER_RADIUS;
+  private coyote = COYOTE;
+  private jumpBuffer = 0;
+
+  constructor(pos: THREE.Vector3) {
+    this.pos = pos;
   }
-  pos.x = p.x;
-  pos.z = p.z;
-  return { speed: input.run ? RUN_SPEED : speed, heading: Math.atan2(dx, dz) };
+
+  get speed(): number {
+    return Math.hypot(this.vx, this.vz);
+  }
+
+  /** Advance one frame. Velocity eases towards the input (no instant starts or stops); collisions slide along walls. */
+  update(input: MoveInput, dt: number, colliders: readonly Collider[], bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): StepResult {
+    const len = Math.hypot(input.x, input.y);
+    const mag = Math.min(1, len);
+    const steering = mag > 0.01;
+    let tx = 0;
+    let tz = 0;
+    if (steering) {
+      const target = input.run ? RUN_SPEED : WALK_SPEED * Math.max(0.5, mag);
+      tx = (input.x / len) * target;
+      tz = (input.y / len) * target;
+    }
+    const k = this.grounded ? (steering ? ACCEL : BRAKE) : AIR_CONTROL;
+    const f = 1 - Math.exp(-k * dt);
+    this.vx += (tx - this.vx) * f;
+    this.vz += (tz - this.vz) * f;
+    if (!steering && Math.hypot(this.vx, this.vz) < 0.12) this.vx = this.vz = 0;
+
+    // horizontal move, sub-stepped so a fast frame can't tunnel through a thin wall
+    const x0 = this.pos.x;
+    const z0 = this.pos.z;
+    const p = { x: x0, z: z0 };
+    const steps = Math.max(1, Math.ceil((this.speed * dt) / 0.12));
+    for (let i = 0; i < steps; i++) {
+      p.x += (this.vx * dt) / steps;
+      p.z += (this.vz * dt) / steps;
+      resolveCollisions(p, this.radius, colliders, this.pos.y);
+      p.x = Math.min(bounds.maxX, Math.max(bounds.minX, p.x));
+      p.z = Math.min(bounds.maxZ, Math.max(bounds.minZ, p.z));
+    }
+    if (dt > 1e-4) {
+      // keep only the velocity that actually happened, so pushing into a wall doesn't build up a store of speed
+      this.vx = (p.x - x0) / dt;
+      this.vz = (p.z - z0) / dt;
+    }
+    this.pos.x = p.x;
+    this.pos.z = p.z;
+
+    // vertical: walk up onto low props, fall with gravity, jump (with a little coyote time and input buffering)
+    const ground = groundAt(p.x, p.z, this.pos.y, colliders);
+    if (this.pos.y < ground) {
+      this.pos.y = Math.min(ground, this.pos.y + Math.max(0.2, ground - this.pos.y) * Math.min(1, dt * 14));
+      if (ground - this.pos.y < 0.005) this.pos.y = ground;
+      this.vy = 0;
+      this.grounded = true;
+    } else if (this.pos.y > ground + 1e-4) {
+      this.vy -= GRAVITY * dt;
+      this.pos.y += this.vy * dt;
+      this.grounded = false;
+      if (this.pos.y <= ground) {
+        this.pos.y = ground;
+        this.vy = 0;
+        this.grounded = true;
+      }
+    } else {
+      this.grounded = true;
+      this.vy = 0;
+    }
+    this.coyote = this.grounded ? COYOTE : Math.max(0, this.coyote - dt);
+    this.jumpBuffer = input.jump ? JUMP_BUFFER : Math.max(0, this.jumpBuffer - dt);
+    if (this.jumpBuffer > 0 && this.coyote > 0) {
+      this.vy = JUMP_VELOCITY;
+      this.pos.y += 0.01;
+      this.grounded = false;
+      this.coyote = 0;
+      this.jumpBuffer = 0;
+    }
+
+    const heading = steering ? Math.atan2(input.x, input.y) : this.speed > 0.6 ? Math.atan2(this.vx, this.vz) : null;
+    return { speed: this.speed, heading, grounded: this.grounded, vy: this.vy };
+  }
 }
