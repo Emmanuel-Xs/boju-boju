@@ -1,0 +1,25 @@
+{
+  "name": "boju-boju",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "convert": "node scripts/convert-models.mjs",
+    "build": "tsc --noEmit && vite build",
+    "check": "node scripts/check-assets.mjs",
+    "release": "npm run convert && npm run build && npm run check"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "@types/three": "^0.186.0",
+    "sharp": "^0.35.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}
