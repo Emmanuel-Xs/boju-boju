@@ -50,7 +50,7 @@ const TRIM = 'silenceremove=start_periods=1:start_silence=0.5:start_threshold=-5
 const TRIM_BOTH = `${TRIM},areverse,${TRIM},areverse`;
 const isLoop = (name) => /^amb_/.test(name);
 const isAligned = (name) => /_loop$/.test(name);
-const ENC = ['-ac', '1', '-ar', '44100', '-c:a', 'libvorbis', '-b:a', '96k'];
+const ENC = ['-fflags', '+bitexact', '-flags:a', '+bitexact', '-ac', '1', '-ar', '44100', '-c:a', 'libvorbis', '-b:a', '96k'];
 
 function convert(name, src, tmp) {
   const dest = path.join(OUT, `${name}.ogg`);

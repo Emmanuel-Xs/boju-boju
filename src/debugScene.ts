@@ -1,5 +1,5 @@
 // /?debug test scene: every pose and animation, three sample start.ng styles plus a fallback case, painting and hunt mode.
-// URL knobs for screenshots: &p=<player state> &m=<masquerade state> &hunt=1 &cam=chars|masq|side|masqside &only=<char index> &susp=0..1 &burst=1 &splash=1
+// URL knobs for screenshots: &p=<player state> &m=<masquerade state> &hunt=1 &cam=chars|masq|side|masqside|top|topclose &only=<char index> &susp=0..1 &burst=1 &splash=1 &masq=0
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createCharacter, PLAYER_STATES, type Character, type PlayerState } from './character';
@@ -54,6 +54,8 @@ export function startDebugScene(): void {
     chars: [[-2.4, 1.4, 6.2], [-2.4, 0.95, 0]],
     masq: [[3.7, 1.5, 5.2], [3.7, 1.0, 0]],
     side: [[3.0, 1.0, 0], [-4.2, 0.8, 0]],
+    top: [[-2.4, 4.2, 0.9], [-2.4, 0, 0]], // roughly what a top-down game camera sees
+    topclose: [[-4.2, 2.6, 0.5], [-4.2, 0, 0]],
     masqside: [[8.5, 1.3, 0], [3.7, 1.0, 0]],
   };
   const [camPos, camTarget] = cams[q.get('cam') ?? 'default'] ?? cams.default;
@@ -74,6 +76,7 @@ export function startDebugScene(): void {
   masq.group.rotation.y = -0.35;
   scene.add(masq.group);
 
+  if (q.get('masq') === '0') masq.group.visible = false;
   const only = q.get('only');
   if (only !== null) chars.forEach((c, i) => (c.group.visible = i === Number(only)));
   // effects

@@ -1,5 +1,5 @@
 // Tiny debug panel for audio. Toggle with the backtick key.
-import { audio, CHANNELS, CHANT_CLIPS, MUSIC_CLIPS, AMBIENCE_CLIPS, type ClipName } from './audio';
+import { audio, CHANNELS, CHANT_CLIPS, MUSIC_CLIPS, AMBIENCE_CLIPS, HORN_CLIPS, SFX_CLIPS, type ClipName } from './audio';
 
 export function mountAudioDebug(): void {
   const panel = document.createElement('div');
@@ -58,8 +58,13 @@ export function mountAudioDebug(): void {
   };
 
   const clips = row('Clips (once)');
-  for (const n of [...CHANT_CLIPS, ...MUSIC_CLIPS, ...AMBIENCE_CLIPS] as ClipName[]) {
+  for (const n of [...CHANT_CLIPS, ...MUSIC_CLIPS, ...AMBIENCE_CLIPS, ...SFX_CLIPS] as ClipName[]) {
     button(clips, n, () => void audio.playOnce(n));
+  }
+  const horns = row('Horns: distant vs close');
+  for (const n of HORN_CLIPS) {
+    button(horns, `${n.slice(-2)} distant`, () => void audio.playOnce(n));
+    button(horns, `${n.slice(-2)} close`, () => void audio.playOnce(n, { distant: false }));
   }
 
   const loops = row('Loops');

@@ -7,7 +7,13 @@ export const CHANNELS: Channel[] = ['chant', 'music', 'ambience', 'sfx'];
 export const CHANT_CLIPS = ['chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught'] as const;
 export const MUSIC_CLIPS = ['drum_loop'] as const;
 export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
-export type ClipName = (typeof CHANT_CLIPS)[number] | (typeof MUSIC_CLIPS)[number] | (typeof AMBIENCE_CLIPS)[number];
+export const HORN_CLIPS = ['sfx_horn_motorbike_01', 'sfx_horn_motorbike_02'] as const;
+export const SFX_CLIPS = [...HORN_CLIPS, 'sfx_rooster_01'] as const;
+export type ClipName =
+  | (typeof CHANT_CLIPS)[number]
+  | (typeof MUSIC_CLIPS)[number]
+  | (typeof AMBIENCE_CLIPS)[number]
+  | (typeof SFX_CLIPS)[number];
 
 const CLIP_CHANNEL: Record<ClipName, Channel> = {
   chant_intro: 'chant',
@@ -19,7 +25,13 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   drum_loop: 'music',
   amb_market: 'ambience',
   amb_generator: 'ambience',
+  sfx_horn_motorbike_01: 'sfx',
+  sfx_horn_motorbike_02: 'sfx',
+  sfx_rooster_01: 'sfx',
 };
+
+/** Clips that always sound far away unless the caller says `distant: false`. */
+const DEFAULT_DISTANT = new Set<ClipName>(HORN_CLIPS);
 
 const MUTE_KEY = 'boju.muted';
 
@@ -30,8 +42,54 @@ export interface Voice {
   stop(fade?: number): void;
 }
 
+export interface DistantOptions {
+  /** Lowpass cutoff in Hz. Default 1200. */
+  cutoff?: number;
+  /** Level multiplier applied before the filter output. Default 0.45. */
+  gain?: number;
+  /** Reverb send level. Default 0.35. */
+  wet?: number;
+  /** Reverb length in seconds. Default 0.6. */
+  reverbSeconds?: number;
+}
+
+/** Short decaying-noise impulse response for a small outdoor space. */
+export function makeImpulse(ctx: BaseAudioContext, seconds = 0.6): AudioBuffer {
+  const len = Math.max(1, Math.round(ctx.sampleRate * seconds));
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = ir.getChannelData(c);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3;
+  }
+  return ir;
+}
+
+/**
+ * input -> lowpass -> quieter -> (dry + convolver reverb) -> output. Returns the nodes so the caller can disconnect them.
+ * Works on offline contexts too, which is how it is tested.
+ */
+export function connectDistant(ctx: BaseAudioContext, input: AudioNode, output: AudioNode, ir: AudioBuffer, o: DistantOptions = {}): AudioNode[] {
+  const lowpass = ctx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = o.cutoff ?? 1200;
+  lowpass.Q.value = 0.7;
+  const level = ctx.createGain();
+  level.gain.value = o.gain ?? 0.45;
+  const dry = ctx.createGain();
+  const convolver = ctx.createConvolver();
+  convolver.buffer = ir;
+  const wet = ctx.createGain();
+  wet.gain.value = o.wet ?? 0.35;
+  input.connect(lowpass).connect(level);
+  level.connect(dry).connect(output);
+  level.connect(convolver).connect(wet).connect(output);
+  return [lowpass, level, dry, convolver, wet];
+}
+
 interface PlayOptions {
   channel?: Channel;
+  /** Play through the distance effect (lowpass, lower gain, short reverb). Horn clips default to true. */
+  distant?: boolean | DistantOptions;
   loop?: boolean;
   volume?: number;
   fadeIn?: number;
@@ -131,6 +189,7 @@ class AudioManager {
   private warned = new Set<string>();
   private voices = new Set<{ name: string; voice: Voice }>();
   private stopGen = new Map<string, number>();
+  private impulse: AudioBuffer | null = null;
 
   private chantToken = 0;
   private chantReadyFlag = false;
@@ -251,7 +310,19 @@ class AudioManager {
     } else {
       gain.gain.value = target;
     }
-    src.connect(gain).connect(this.channelGain[channel]);
+    const distant = opts.distant ?? DEFAULT_DISTANT.has(name);
+    let fxNodes: AudioNode[] = [];
+    let tailMs = 0;
+    if (distant) {
+      const o = distant === true ? {} : distant;
+      this.impulse ??= makeImpulse(ctx, o.reverbSeconds ?? 0.6);
+      const ir = o.reverbSeconds ? makeImpulse(ctx, o.reverbSeconds) : this.impulse;
+      fxNodes = connectDistant(ctx, gain, this.channelGain[channel], ir, o);
+      tailMs = ((o.reverbSeconds ?? 0.6) + 0.1) * 1000;
+      src.connect(gain);
+    } else {
+      src.connect(gain).connect(this.channelGain[channel]);
+    }
 
     let resolveEnded!: () => void;
     const ended = new Promise<void>((r) => (resolveEnded = r));
@@ -284,8 +355,12 @@ class AudioManager {
     src.onended = () => {
       this.voices.delete(entry);
       src.disconnect();
-      gain.disconnect();
       resolveEnded();
+      // let the reverb tail ring out before tearing the chain down
+      window.setTimeout(() => {
+        gain.disconnect();
+        fxNodes.forEach((n) => n.disconnect());
+      }, tailMs);
     };
     src.start();
     return voice;

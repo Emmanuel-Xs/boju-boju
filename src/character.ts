@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { toon, facet } from './toon';
 import { Animator, type Clip, type Pose } from './animator';
+import { bakeSkinned } from './bake';
 
 // --- start.ng style object ---------------------------------------------------
 
@@ -133,20 +134,23 @@ const PLAYER_CLIPS: Record<PlayerState, Clip<PlayerState>> = {
     hipL: { rz: -0.08 },
     hipR: { rz: 0.08 },
   }),
+  // A tight bundle: knees to chest, back rounded, head tucked between the shoulders, arms hugging the shins.
+  // From above it should read as one rounded lump (a sack of rice), not a person kneeling.
   curl_ball: (t) => {
-    const b = Math.sin(t * 2.4) * 0.012;
+    const b = Math.sin(t * 2.4) * 0.008;
     return {
-      hips: { py: -0.72 + b, pz: -0.06 },
-      spine: { rx: 0.95 },
-      head: { rx: 0.5 },
-      hipL: { rx: -2.0, rz: -0.12 },
-      hipR: { rx: -2.0, rz: 0.12 },
-      kneeL: { rx: 2.4 },
-      kneeR: { rx: 2.4 },
-      shoulderL: { rx: -1.45, rz: 0.25 },
-      shoulderR: { rx: -1.45, rz: -0.25 },
-      elbowL: { rx: -2.0 },
-      elbowR: { rx: -2.0 },
+      root: { sx: 0.1, sy: -0.06, sz: 0.12 },
+      hips: { py: -0.76 + b, pz: -0.12 },
+      spine: { rx: 0.6 },
+      head: { rx: 1.3, py: -0.3, pz: -0.1 },
+      hipL: { rx: -2.35, rz: 0.06 },
+      hipR: { rx: -2.35, rz: -0.06 },
+      kneeL: { rx: 2.6 },
+      kneeR: { rx: 2.6 },
+      shoulderL: { rx: -0.85, rz: 0.5 },
+      shoulderR: { rx: -0.85, rz: -0.5 },
+      elbowL: { rx: -2.2 },
+      elbowR: { rx: -2.2 },
     };
   },
 };
@@ -200,8 +204,10 @@ export function createCharacter(input?: Record<string, unknown> | null): Charact
   const rig = new THREE.Group();
   group.add(rig);
   const J: Record<string, THREE.Object3D> = { root: rig };
+  const bones: THREE.Bone[] = [];
   const joint = (name: string, parent: THREE.Object3D, x = 0, y = 0, z = 0) => {
-    const o = new THREE.Object3D();
+    const o = new THREE.Bone();
+    bones.push(o);
     o.name = name;
     o.position.set(x, y, z);
     parent.add(o);
@@ -414,6 +420,41 @@ export function createCharacter(input?: Record<string, unknown> | null): Charact
       break;
   }
 
+  // Merge every static part into a handful of skinned meshes (one draw call each). Top and bottom stay on their own
+  // paintable materials; everything else uses vertex colours. Hair, hat and accessory stay separate so hunt mode can hide them.
+  const bodyMat = toon('#ffffff', { vertexColors: true });
+  const layerMat = toon('#ffffff', { vertexColors: true, side: THREE.DoubleSide }); // crown ring is open
+  owned.push(bodyMat, layerMat);
+  const meshesOf = (list: THREE.Object3D[]) => {
+    const set = new Set<THREE.Mesh>();
+    list.forEach((o) => o.traverse((c) => c instanceof THREE.Mesh && set.add(c)));
+    return set;
+  };
+  const hairSet = meshesOf(hair);
+  const hatSet = meshesOf(hat);
+  const accSet = meshesOf(acc);
+  const parts = { top: [], bottom: [], body: [], hair: [], hat: [], acc: [] } as Record<string, THREE.Mesh[]>;
+  rig.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    if (o.material === topMat) parts.top.push(o);
+    else if (o.material === bottomMat) parts.bottom.push(o);
+    else if (hairSet.has(o)) parts.hair.push(o);
+    else if (hatSet.has(o)) parts.hat.push(o);
+    else if (accSet.has(o)) parts.acc.push(o);
+    else parts.body.push(o);
+  });
+  const baked = bakeSkinned(rig, bones, [
+    { meshes: parts.top, material: topMat, vertexColors: false },
+    { meshes: parts.bottom, material: bottomMat, vertexColors: false },
+    { meshes: parts.body, material: bodyMat, vertexColors: true },
+    { meshes: parts.hair, material: bodyMat, vertexColors: true },
+    { meshes: parts.hat, material: layerMat, vertexColors: true },
+    { meshes: parts.acc, material: bodyMat, vertexColors: true },
+  ]);
+  // baked meshes come back in group order, skipping empty groups
+  const nonEmpty = ['top', 'bottom', 'body', 'hair', 'hat', 'acc'].filter((k) => parts[k].length);
+  const layerMeshes: THREE.Object3D[] = baked.filter((_, i) => ['hair', 'hat', 'acc'].includes(nonEmpty[i]));
+
   let huntMode = false;
   const animator = new Animator<PlayerState>(J, PLAYER_CLIPS, 'idle');
 
@@ -432,14 +473,12 @@ export function createCharacter(input?: Record<string, unknown> | null): Charact
     },
     setHuntMode(on) {
       huntMode = on;
-      for (const o of [...hair, ...hat, ...acc]) o.visible = !on;
+      for (const o of layerMeshes) o.visible = !on;
     },
     play: (state, blendTime) => animator.play(state, blendTime),
     update: (dt) => animator.update(dt),
     dispose() {
-      group.traverse((o) => {
-        if (o instanceof THREE.Mesh) o.geometry.dispose();
-      });
+      baked.forEach((m) => m.geometry.dispose());
       owned.forEach((m) => m.dispose());
     },
   };

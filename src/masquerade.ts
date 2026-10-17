@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { toon, facet } from './toon';
 import { Animator, type Clip, type Pose } from './animator';
+import { bakeSkinned } from './bake';
 
 export const MASQUERADE_STATES = [
   'sing_eyes_covered',
@@ -153,8 +154,10 @@ export function createMasquerade(): Masquerade {
   const rig = new THREE.Group();
   group.add(rig);
   const J: Record<string, THREE.Object3D> = { root: rig };
+  const bones: THREE.Bone[] = [];
   const joint = (name: string, parent: THREE.Object3D, x = 0, y = 0, z = 0) => {
-    const o = new THREE.Object3D();
+    const o = new THREE.Bone();
+    bones.push(o);
     o.position.set(x, y, z);
     parent.add(o);
     J[name] = o;
@@ -316,6 +319,20 @@ export function createMasquerade(): Masquerade {
     lower.instanceMatrix.needsUpdate = true;
   }
 
+  // Merge the static parts (cone cloth, sleeves, shoes, mask, crest) into two skinned meshes; strips are already instanced.
+  const partsMat = toon('#ffffff', { vertexColors: true });
+  owned.push(partsMat);
+  const clothParts: THREE.Mesh[] = [];
+  const otherParts: THREE.Mesh[] = [];
+  rig.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || (o as THREE.InstancedMesh).isInstancedMesh) return;
+    (o.material === cloth ? clothParts : otherParts).push(o);
+  });
+  const baked = bakeSkinned(rig, bones, [
+    { meshes: clothParts, material: cloth, vertexColors: false },
+    { meshes: otherParts, material: partsMat, vertexColors: true },
+  ]);
+
   const animator = new Animator<MasqueradeState>(J, CLIPS, 'search_walk', 0.25);
   writeStrips();
 
@@ -388,9 +405,7 @@ export function createMasquerade(): Masquerade {
     play: (state, blendTime) => animator.play(state, blendTime),
     update,
     dispose() {
-      group.traverse((o) => {
-        if (o instanceof THREE.Mesh) o.geometry.dispose();
-      });
+      baked.forEach((m) => m.geometry.dispose());
       upperGeo.dispose();
       lowerGeo.dispose();
       upper.dispose();
