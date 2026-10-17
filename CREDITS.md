@@ -55,6 +55,12 @@ Licence for each: Creative Commons 0 (https://creativecommons.org/publicdomain/z
 | sfx_horn_motorbike_01.ogg | 13FMikovaA_jawa klakson | 13FPanska_Mikova_Adela | https://freesound.org/people/13FPanska_Mikova_Adela/sounds/378336/ |
 | sfx_horn_motorbike_02.ogg | 13FMikovaA_simson klakson | 13FPanska_Mikova_Adela | https://freesound.org/people/13FPanska_Mikova_Adela/sounds/378351/ |
 
+## Placeholder chant voices
+
+Placeholder voices generated with YarnGPT2 by Saheed Niyi (Apache 2.0): https://huggingface.co/saheedniyi/YarnGPT2
+
+Used as `chant_intro`, `chant_ask`, `chant_not_yet`, `chant_open`, `chant_hunt` and `caught` in `public/audio/`, pitch-shifted and mixed with ffmpeg. They are stand-ins until real recordings replace them.
+
 ## Libraries
 
 | Library | Licence |

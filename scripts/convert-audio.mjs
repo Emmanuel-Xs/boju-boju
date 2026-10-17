@@ -2,7 +2,7 @@
 // silence trimmed to at most 0.5 s at each end, ambience loops (amb_*) made seamless with a tail/head crossfade.
 // *_loop files are assumed to be bar-aligned already: they are only re-encoded, since trimming or crossfading would break the beat.
 // Needs ffmpeg + ffprobe on PATH.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -49,6 +49,16 @@ const duration = (file) =>
 const TRIM = 'silenceremove=start_periods=1:start_silence=0.5:start_threshold=-50dB';
 const TRIM_BOTH = `${TRIM},areverse,${TRIM},areverse`;
 const isLoop = (name) => /^amb_/.test(name);
+// Voice lines are levelled to one loudness (two-pass EBU R128) so they always sit above the ambience and music.
+const isVoice = (name) => /^chant_|^caught$/.test(name);
+const LOUD = 'I=-16:TP=-1.5:LRA=7';
+function loudnormFilter(src, pre) {
+  const r = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', src, '-af', `${pre},loudnorm=${LOUD}:print_format=json`, '-f', 'null', '-'], { encoding: 'utf8' });
+  const m = r.stderr.match(/\{[^{}]*"input_i"[^{}]*\}/s);
+  if (!m) return `loudnorm=${LOUD}`; // too short or silent to measure: single pass
+  const j = JSON.parse(m[0]);
+  return `loudnorm=${LOUD}:measured_I=${j.input_i}:measured_TP=${j.input_tp}:measured_LRA=${j.input_lra}:measured_thresh=${j.input_thresh}:offset=${j.target_offset}:linear=true`;
+}
 const isAligned = (name) => /_loop$/.test(name);
 const ENC = ['-fflags', '+bitexact', '-flags:a', '+bitexact', '-ac', '1', '-ar', '44100', '-c:a', 'libvorbis', '-b:a', '96k'];
 
@@ -59,7 +69,8 @@ function convert(name, src, tmp) {
     return;
   }
   if (!isLoop(name)) {
-    ff(['-i', src, '-af', TRIM_BOTH, ...ENC, dest]);
+    const chain = isVoice(name) ? `${TRIM_BOTH},${loudnormFilter(src, TRIM_BOTH)}` : TRIM_BOTH;
+    ff(['-i', src, '-af', chain, ...ENC, dest]);
     return;
   }
   const wav = path.join(tmp, `${name}.wav`);
