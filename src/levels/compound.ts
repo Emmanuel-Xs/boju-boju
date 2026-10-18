@@ -55,6 +55,9 @@ export interface Compound {
   /** Where the masquerade stands at the start of every round, and the turntable the lobby shows the player on. */
   seekerStart: { x: number; z: number; yaw: number };
   lobbyPos: { x: number; z: number };
+  /** How many chickens wander the level, and the ambience: how loud the crowd chatter is (1 = normal) and whether a generator hums. */
+  chickenCount: number;
+  ambience: { chatter: number; generator: boolean };
   /** Where the chickens may roam. */
   chickenArea: { minX: number; maxX: number; minZ: number; maxZ: number };
   ground: Ground;
@@ -65,7 +68,8 @@ export interface Compound {
   fadeGroups: FadeGroup[];
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   spawn: THREE.Vector3;
-  generator: THREE.Vector3;
+  /** Where the generator hums from, or null when there is none. */
+  generator: THREE.Vector3 | null;
   /** The gate in the east fence: the way home. Its middle at floor level, and half the width of the opening. */
   gate: { x: number; z: number; halfWidth: number };
   baseColorAt(point: THREE.Vector3): THREE.Color | null;
@@ -717,6 +721,8 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
     id: 'compound',
     name: 'The Compound',
     assetCount: COMPOUND_ASSET_COUNT,
+    chickenCount: 7,
+    ambience: { chatter: 1, generator: true },
     seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
     lobbyPos: { x: 0.5, z: 0.5 },
     chickenArea: { minX: -14.2, maxX: 14.2, minZ: -8.7, maxZ: 8.7 },

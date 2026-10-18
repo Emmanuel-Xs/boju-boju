@@ -1,0 +1,1 @@
+export{i as createCompound}from"./game-CNy4zVob.js";

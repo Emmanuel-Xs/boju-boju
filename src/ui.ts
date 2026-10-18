@@ -99,19 +99,20 @@ export class Screens {
     left.append(who);
     left.append(el('div', 'padding:8px 14px;background:#150c0acc;border-radius:12px;font:600 14px system-ui', best ? `Your best run: ${best.score} points · ${best.rounds} round${best.rounds === 1 ? '' : 's'} · ${best.camo}% camo` : id.signedIn ? 'No run saved yet. Go on, hide!' : 'Sign in to save your best run.'));
     if (this.levelSelect && this.levelSelect.levels.length > 1) {
+      // one short row of level buttons (names only) and a line about the chosen one, so Play stays on screen even in a short window
       const { levels, current, pick } = this.levelSelect;
       const row = el('div', 'display:flex;gap:8px');
       for (const l of levels) {
         const on = l.id === current;
-        const b = el('button', `flex:1;min-height:56px;padding:8px 10px;border-radius:14px;cursor:pointer;touch-action:manipulation;text-align:left;border:2px solid ${on ? ACCENT : '#fff3'};background:${on ? '#2a3a0acc' : '#150c0acc'};color:#fff;font:600 12px/1.3 system-ui`);
-        b.append(el('div', `font:800 15px system-ui;color:${on ? ACCENT : '#fff'}`, l.name), el('div', 'opacity:.8;margin-top:2px', l.blurb));
+        const b = el('button', `flex:1 1 0;min-height:44px;padding:6px 8px;border-radius:14px;cursor:pointer;touch-action:manipulation;border:2px solid ${on ? ACCENT : '#fff3'};background:${on ? '#2a3a0acc' : '#150c0acc'};color:${on ? ACCENT : '#fff'};font:800 14px system-ui`, l.name.replace('The ', ''));
+        b.title = l.blurb;
         b.setAttribute('aria-pressed', String(on));
         b.onclick = () => {
           if (!on) pick(l.id);
         };
         row.append(b);
       }
-      left.append(row);
+      left.append(row, el('div', 'font:600 12px/1.35 system-ui;opacity:.9;text-shadow:0 1px 6px #000;margin-top:-4px', levels.find((l) => l.id === current)?.blurb ?? ''));
     }
     const play = el('button', BUTTON + ';font-size:20px;min-height:56px', 'Play');
     play.onclick = () => this.h.play();

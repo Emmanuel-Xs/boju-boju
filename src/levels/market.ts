@@ -360,6 +360,8 @@ export async function createMarket(onAsset?: () => void): Promise<Compound> {
     id: 'market',
     name: 'The Market',
     assetCount: MARKET_ASSET_COUNT,
+    chickenCount: 7,
+    ambience: { chatter: 1.5, generator: true },
     seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
     lobbyPos: { x: 0.5, z: 0.5 },
     chickenArea: { minX: -14.2, maxX: 14.2, minZ: -8.7, maxZ: 8.7 },

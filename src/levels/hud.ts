@@ -30,6 +30,7 @@ export interface HudHandlers {
   eyedropper(): void;
   zone(): void;
   pattern(): void;
+  uniform(): void;
   selectZone(zone: PaintZone): void;
   recent(index: number): void;
   pose(index: number): void;
@@ -121,6 +122,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     group('Eyedropper', kbd('E') + ' then click'),
     group('Zone', kbd('Q')),
     group('Pattern', kbd('T')),
+    group('Uniform', kbd('U')),
     group('Poses', kbd('1') + kbd('2') + kbd('3') + kbd('4')),
     group('Hunt mode', kbd('H')),
     group('Camo text', kbd('C')),
@@ -237,6 +239,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     mk('Palette', togglePalette, abs + 'right:12px;bottom:140px;width:100px;height:46px');
     mk('Zone', h.zone, abs + 'right:12px;bottom:84px;width:100px;height:46px');
     patternBtn = mk('Pattern: solid', h.pattern, abs + 'right:120px;bottom:84px;width:96px;height:46px;font-size:12px');
+    mk('Uniform', h.uniform, abs + 'right:120px;bottom:136px;width:96px;height:46px;font-size:12px');
     mk('Jump', h.jump, abs + 'right:12px;bottom:20px;width:100px;height:54px;background:#1a8a3acc');
     poseBtns = POSE_LABELS.map((l, i) => mk(l, () => h.pose(i), `${abs}left:${10 + i * (poseW + 4)}px;bottom:28px;width:${poseW}px;height:46px;border-radius:12px;font-size:11px`));
   } else {
@@ -244,6 +247,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     eyeBtn = mk('Pick\n(E)', h.eyedropper, tool, tools);
     mk('Zone\n(Q)', h.zone, tool, tools);
     patternBtn = mk('Solid\n(T)', h.pattern, tool, tools);
+    mk('School\n(U)', h.uniform, tool, tools);
     mk('Palette\n(P)', togglePalette, tool, tools);
     poseBtns = ['Stiff\n(1)', 'Crouch\n(2)', 'Wall\n(3)', 'Ball\n(4)'].map((l, i) => mk(l, () => h.pose(i), tool, tools));
     for (const b of [eyeBtn, ...poseBtns]) b.style.whiteSpace = 'pre';

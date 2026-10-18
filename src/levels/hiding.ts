@@ -42,6 +42,9 @@ export interface FrameInfo {
   yaw: number;
 }
 
+/** The school uniform preset (Level 3 leans on it, but it works anywhere). */
+export const UNIFORM = { top: '#f1eee2', bottom: '#1f3a78' };
+
 export class HidingController {
   readonly probe: LevelProbe;
   readonly camo: CamoMeter;
@@ -76,6 +79,7 @@ export class HidingController {
       eyedropper: () => this.toggleAim(),
       zone: () => this.toggleZone(),
       pattern: () => this.cyclePattern(),
+      uniform: () => this.wearUniform(),
       selectZone: (z) => {
         this.zone = z;
       },
@@ -178,6 +182,20 @@ export class HidingController {
 
   private fadeNext = 0;
 
+  /** U: the school uniform, a one-press preset: a white shirt and navy shorts or skirt, painted like any other colours (it resets with every round). */
+  wearUniform(): void {
+    const { top, bottom } = UNIFORM;
+    this.patternKind = 'solid';
+    this.hud.setPattern('solid');
+    this.o.player.setZoneColor('top', top);
+    this.o.player.setZoneColor('bottom', bottom);
+    this.lastPick = { top: new THREE.Color(top), bottom: new THREE.Color(bottom) };
+    this.painted.top = this.painted.bottom = true;
+    this.camo.invalidate();
+    this.hud.toast('School uniform on: white shirt, navy bottoms');
+    void audio.unlock().then(() => audio.playOnce('sfx_cloth_rustle_01', { volume: 2 }));
+  }
+
   /** T: solid, then stripes, then dots. */
   cyclePattern(): void {
     this.patternKind = this.patternKind === 'solid' ? 'stripes' : this.patternKind === 'stripes' ? 'dots' : 'solid';
@@ -218,6 +236,7 @@ export class HidingController {
     if (!down || e.repeat) return;
     if (e.code === 'KeyQ') this.toggleZone();
     else if (e.code === 'KeyT') this.cyclePattern();
+    else if (e.code === 'KeyU') this.wearUniform();
     else if (e.code === 'KeyH') {
       this.o.player.setHuntMode(!this.o.player.huntMode);
       this.camo.invalidate();

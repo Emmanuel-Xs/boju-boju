@@ -11,6 +11,7 @@ export interface LevelInfo {
 export const LEVELS: readonly LevelInfo[] = [
   { id: 'compound', name: 'The Compound', blurb: 'A Lagos yard: rooms, a danfo, drums and a zinc fence.' },
   { id: 'market', name: 'The Market', blurb: 'Stalls hung with ankara cloth, produce crates and a keke. Busier backgrounds.' },
+  { id: 'classroom', name: 'The Classroom', blurb: 'Rows of desks, a chalkboard, lockers and bookcases. Try the school uniform.' },
 ];
 
 const KEY = 'boju.level';
@@ -34,9 +35,10 @@ export function chooseLevel(id: string): void {
 }
 
 /** Files the chosen level fetches while building, for the loading bar. */
-export const assetCountOf = (id: string): number => (id === 'market' ? 7 + 7 : 7 + 10);
+export const assetCountOf = (id: string): number => (id === 'market' ? 7 + 7 : id === 'classroom' ? 6 + 6 : 7 + 10);
 
 export async function createLevel(id: string, onAsset?: () => void): Promise<Compound> {
   if (id === 'market') return (await import('./market')).createMarket(onAsset);
+  if (id === 'classroom') return (await import('./classroom')).createClassroom(onAsset);
   return (await import('./compound')).createCompound(onAsset);
 }

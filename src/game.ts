@@ -146,7 +146,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (tier >= 2) renderer.setPixelRatio(1);
     if (tier >= 3) fx.dust.pool.points.visible = false;
   });
-  const chickens = new Chickens(level.colliders, 5, { ...CHICKEN_CONFIG, area: level.chickenArea });
+  const chickens = new Chickens(level.colliders, 5, { ...CHICKEN_CONFIG, area: level.chickenArea, count: level.chickenCount });
   const prints = new Footprints(scene);
   const gateMarker = createGateMarker(level.gate);
   scene.add(gateMarker.group);
@@ -329,9 +329,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (ambienceOn) return;
     ambienceOn = true;
     void audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS]).then(() => {
-      void audio.loop('amb_market', { volume: 0.28 });
+      void audio.loop('amb_market', { volume: 0.28 * level.ambience.chatter });
       const g = level.generator;
-      void audio.loop('amb_generator', { volume: 0.55, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
+      if (g && level.ambience.generator) void audio.loop('amb_generator', { volume: 0.55, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
       const rooster = () => {
         void audio.playOnce('sfx_rooster_01', { volume: 0.3, distant: { gain: 0.6 } });
         window.setTimeout(rooster, 12000 + Math.random() * 18000);
