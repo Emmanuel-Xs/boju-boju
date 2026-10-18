@@ -670,6 +670,12 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   function roundNumbers(r: number, small: boolean) {
     const n = { ...difficultyFor(r, cfg) };
     const tc = TWIST_CONFIG;
+    const lt = level.seekerTuning;
+    n.patrolSpeed *= lt.speed;
+    n.investigateSpeed *= lt.speed;
+    n.checkSpeed *= lt.speed;
+    n.visionFovDeg *= lt.fov;
+    n.visionRange *= lt.range;
     if (twist.nepa) {
       n.visionFovDeg = Math.min(n.visionFovDeg, tc.nepa.visionFovDeg);
       n.visionRange = Math.min(n.visionRange, tc.nepa.visionRange);
@@ -680,7 +686,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       n.checkSpeed *= tc.second.speedMul;
       n.visionFovDeg *= tc.second.fovMul;
     }
-    return n;
+    // the closing-in and trail-following speeds are not part of the round ramp, but follow the same level and size tuning
+    const speed = lt.speed * (small ? tc.second.speedMul : 1);
+    return { ...n, chaseSpeed: SEEKER_CONFIG.chaseSpeed * speed, trailSpeed: SEEKER_CONFIG.trailSpeed * speed };
   }
 
   /** The second, smaller masquerade is built the first time a round needs it (it shares the first one's patrol, so they split the yard). */

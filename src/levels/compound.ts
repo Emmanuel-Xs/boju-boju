@@ -57,6 +57,8 @@ export interface Compound {
   lobbyPos: { x: number; z: number };
   /** How many chickens wander the level, and the ambience: how loud the crowd chatter is (1 = normal) and whether a generator hums. */
   chickenCount: number;
+  /** How this level tunes the masquerade on top of the round's numbers: speeds, cone width and cone length are multiplied by these (1 = unchanged). */
+  seekerTuning: { speed: number; fov: number; range: number };
   ambience: { chatter: number; generator: boolean };
   /** Where the chickens may roam. */
   chickenArea: { minX: number; maxX: number; minZ: number; maxZ: number };
@@ -722,6 +724,7 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
     name: 'The Compound',
     assetCount: COMPOUND_ASSET_COUNT,
     chickenCount: 7,
+    seekerTuning: { speed: 1, fov: 1, range: 1 },
     ambience: { chatter: 1, generator: true },
     seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
     lobbyPos: { x: 0.5, z: 0.5 },

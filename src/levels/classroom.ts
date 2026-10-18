@@ -3,7 +3,7 @@
 //   middle  four rows of pupils' desks and chairs with a clear aisle down the middle to the door
 //   south   a row of blue lockers, windows with blue wax-print curtains, a fire extinguisher, a pile of school bags
 //   west    three bookcases, an alphabet poster, a reading corner with a rug and cushions
-// Every hideable surface is in the surface registry with a base colour, as in the other levels. A couple of stray chickens have wandered in.
+// Every hideable surface is in the surface registry with a base colour, as in the other levels. No chickens here (they are in the yard and the market).
 import * as THREE from 'three';
 import { toon } from '../toon';
 import { box, circle, type Collider, resolveCollisions, PLAYER_RADIUS } from './controller';
@@ -307,7 +307,9 @@ export async function createClassroom(onAsset?: () => void): Promise<Compound> {
     id: 'classroom',
     name: 'The Classroom',
     assetCount: CLASSROOM_ASSET_COUNT,
-    chickenCount: 3,
+    // an open room with low desks is easy to see into, so the masquerade here is slower and sees through a narrower, shorter cone
+    chickenCount: 0,
+    seekerTuning: { speed: 0.8, fov: 0.75, range: 0.9 },
     ambience: { chatter: 0.3, generator: false },
     seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
     lobbyPos: { x: 0.5, z: 0.5 },

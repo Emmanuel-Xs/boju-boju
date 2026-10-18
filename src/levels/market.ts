@@ -361,6 +361,7 @@ export async function createMarket(onAsset?: () => void): Promise<Compound> {
     name: 'The Market',
     assetCount: MARKET_ASSET_COUNT,
     chickenCount: 7,
+    seekerTuning: { speed: 1, fov: 1, range: 1 },
     ambience: { chatter: 1.5, generator: true },
     seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
     lobbyPos: { x: 0.5, z: 0.5 },
