@@ -19,10 +19,33 @@ export const CHICKEN_CONFIG = {
   wanderRange: [1, 4] as [number, number],
   /** Where they may roam (stay inside the yard: not through the gate, not onto the road). */
   area: { minX: -14.2, maxX: 14.2, minZ: -8.7, maxZ: 8.7 },
+  /**
+   * Chickens snitch: one within snitchPlayerRange of the player panics and squawks while the masquerade is within snitchSeekerRange of the chicken.
+   * The panic lasts panicTime seconds (squawking every squawkEvery), and the same hen will not do it again for snitchCooldown seconds.
+   */
+  snitchPlayerRange: 3,
+  snitchSeekerRange: 8,
+  panicTime: 2.6,
+  squawkEvery: 0.7,
+  snitchCooldown: 7,
   plumage: ['#f2eee4', '#8a4b2a', '#2b2623', '#c8903f', '#a89a82', '#d9d2c0', '#6b3a22'],
 };
 
-type State = 'idle' | 'peck' | 'walk' | 'flee';
+type State = 'idle' | 'peck' | 'walk' | 'flee' | 'panic';
+
+/** A squawk heard this frame. `first` marks the start of a panic (the moment the masquerade turns to look). */
+export interface Squawk {
+  x: number;
+  z: number;
+  first: boolean;
+}
+
+/** Who the chickens are snitching to: set `active` only during the hunt. */
+export interface Snitch {
+  active: boolean;
+  player: { x: number; z: number };
+  seeker: { x: number; z: number } | null;
+}
 interface Hen {
   x: number;
   z: number;
@@ -40,6 +63,9 @@ interface Hen {
   speed: number;
   /** Seconds spent pressed against something while trying to walk. */
   stuck: number;
+  snitchCd: number;
+  squawkT: number;
+  hopT: number;
 }
 
 const tmp = new THREE.Matrix4();
@@ -128,7 +154,7 @@ export class Chickens {
 
     const a = cfg.area;
     for (let i = 0; i < n; i++) {
-      const hen: Hen = { x: 0, z: 0, yaw: this.r() * Math.PI * 2, state: 'idle', timer: rand(this.r, cfg.idleTime) * this.r(), tx: 0, tz: 0, phase: this.r() * 6, peckPhase: this.r() * 6, hop: 0, hopV: 0, lookYaw: 0, lookTarget: 0, speed: 0, stuck: 0 };
+      const hen: Hen = { x: 0, z: 0, yaw: this.r() * Math.PI * 2, state: 'idle', timer: rand(this.r, cfg.idleTime) * this.r(), tx: 0, tz: 0, phase: this.r() * 6, peckPhase: this.r() * 6, hop: 0, hopV: 0, lookYaw: 0, lookTarget: 0, speed: 0, stuck: 0, snitchCd: 0, squawkT: 0, hopT: 0 };
       for (let tries = 0; tries < 40; tries++) {
         hen.x = a.minX + this.r() * (a.maxX - a.minX);
         hen.z = a.minZ + this.r() * (a.maxZ - a.minZ);
@@ -163,10 +189,12 @@ export class Chickens {
   }
 
   /** `threats`: ground positions to scatter from (the player, the seeker); a threat that is running scares from further away. */
-  update(dt: number, threats: { x: number; z: number; running?: boolean }[]): void {
+  update(dt: number, threats: { x: number; z: number; running?: boolean }[], snitch?: Snitch): Squawk[] {
     const c = this.cfg;
     dt = Math.min(dt, 0.05);
+    const squawks: Squawk[] = [];
     for (const h of this.hens) {
+      h.snitchCd = Math.max(0, h.snitchCd - dt);
       // scared?
       let fx = 0;
       let fz = 0;
@@ -182,7 +210,33 @@ export class Chickens {
           fz += dz / (d || 1);
         }
       }
-      if (scared && h.state !== 'flee') {
+      // a chicken next to the hider, with the masquerade close by, gives them away
+      if (snitch?.active && snitch.seeker && h.snitchCd <= 0 && h.state !== 'panic' && Math.hypot(h.x - snitch.player.x, h.z - snitch.player.z) <= c.snitchPlayerRange && Math.hypot(h.x - snitch.seeker.x, h.z - snitch.seeker.z) <= c.snitchSeekerRange) {
+        h.state = 'panic';
+        h.timer = c.panicTime;
+        h.snitchCd = c.snitchCooldown + c.panicTime;
+        h.squawkT = c.squawkEvery;
+        h.hopT = 0;
+        h.hopV = 2.4;
+        squawks.push({ x: h.x, z: h.z, first: true });
+      }
+      if (h.state === 'panic') {
+        // flap and bolt in short zigzags, squawking
+        h.hopT -= dt;
+        if (h.hopT <= 0) {
+          h.hopT = 0.35;
+          h.hopV = 2 + this.r() * 0.6;
+          const ang = this.r() * Math.PI * 2;
+          h.tx = h.x + Math.sin(ang) * 2.5;
+          h.tz = h.z + Math.cos(ang) * 2.5;
+        }
+        h.squawkT -= dt;
+        if (h.squawkT <= 0) {
+          h.squawkT = c.squawkEvery;
+          squawks.push({ x: h.x, z: h.z, first: false });
+        }
+      }
+      if (scared && h.state !== 'flee' && h.state !== 'panic') {
         h.state = 'flee';
         h.timer = rand(this.r, c.fleeTime);
         h.hopV = 1.6 + this.r() * 0.6; // a startled hop
@@ -206,14 +260,14 @@ export class Chickens {
       } else if (h.state === 'peck' && h.timer <= 0) {
         h.state = 'idle';
         h.timer = rand(this.r, c.idleTime);
-      } else if (h.state === 'flee' && h.timer <= 0) {
+      } else if ((h.state === 'flee' || h.state === 'panic') && h.timer <= 0) {
         h.state = 'idle';
         h.timer = rand(this.r, c.idleTime);
       }
 
       // walking / fleeing
       let target = 0;
-      if (h.state === 'walk' || h.state === 'flee') {
+      if (h.state === 'walk' || h.state === 'flee' || h.state === 'panic') {
         const dx = h.tx - h.x;
         const dz = h.tz - h.z;
         const d = Math.hypot(dx, dz);
@@ -221,12 +275,12 @@ export class Chickens {
           h.state = 'idle';
           h.timer = rand(this.r, c.idleTime);
         } else {
-          target = h.state === 'flee' ? c.fleeSpeed : c.walkSpeed;
+          target = h.state === 'flee' ? c.fleeSpeed : h.state === 'panic' ? c.fleeSpeed * 0.85 : c.walkSpeed;
           // turn towards the target at a limited rate (never a snap), and stop steering once it is right under the beak
           if (d > 0.25) {
             const want = Math.atan2(dx, dz);
             const diff = Math.atan2(Math.sin(want - h.yaw), Math.cos(want - h.yaw));
-            const maxTurn = (h.state === 'flee' ? 11 : 4.5) * dt;
+            const maxTurn = (h.state === 'flee' || h.state === 'panic' ? 11 : 4.5) * dt;
             h.yaw += Math.max(-maxTurn, Math.min(maxTurn, diff));
           }
         }
@@ -259,6 +313,7 @@ export class Chickens {
       }
     }
     this.write();
+    return squawks;
   }
 
   private write(): void {
@@ -266,7 +321,7 @@ export class Chickens {
       const walking = h.speed > 0.05;
       const bob = walking ? Math.abs(Math.sin(h.phase)) * 0.012 : 0;
       const peck = h.state === 'peck' ? Math.max(0, Math.sin(h.peckPhase)) ** 2 : 0;
-      const flee = h.state === 'flee' ? 1 : 0;
+      const flee = h.state === 'flee' || h.state === 'panic' ? 1 : 0;
       const y = 0.22 + bob + h.hop;
       // body
       const root = m4(h.x, y, h.z, peck * 0.3 - flee * 0.12, h.yaw, 0);

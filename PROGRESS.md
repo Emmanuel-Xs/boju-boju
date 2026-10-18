@@ -130,3 +130,15 @@ Record each as a dry mono WAV, no music or reverb. The English glosses under the
 **Not verified:** how it feels (the numbers say corners are checked and bad camo gets caught; whether 90 s hunts and the 40-to-70 camo cliff are fun needs hands on a keyboard), real device fps with the new patrol (it costs about 100 to 450 ms once at load), audio by ear (the drum roll is the existing djembe hits sped up), touch.
 
 **Open for you:** confirm Part 2 feels good, then I do 4 (chickens snitch), 5 (memory), 6 (round twists) one at a time. Changing `startng.json` changes the live board's columns; the old rows' meaning (rounds/hidden/camo) may not carry over.
+
+## Quieter background + chickens snitch (dev branch)
+**Mix (you said the background hid the egungun and the boju boju chant)**
+- Chant channel up to 1.15 (the limiter catches the peaks); ambience channel 0.6 to 0.35, music 0.5 to 0.3, sfx 0.8 to 0.65.
+- While a chant line plays the ambience and music drop to 15% (was 35%) and sfx to 40% (was 60%).
+- Market chatter clip 0.85 to 0.28 (the "background chatters" you asked to cut a bit more), generator 1 to 0.55, rooster 0.45 to 0.3, horns 0.8 to 0.5.
+- Computed from clip loudness: chant about -15 LUFS, market chatter about -48 (about -64 while a line plays), generator about -41 at 2.5 m. Not listened to by ear. Knobs: `MIX_CONFIG` in `src/audio.ts` and the volumes in `startAmbience` in `src/game.ts`.
+
+**Chickens snitch (item 4)**
+- A hen within 3 m of the player panics when the masquerade is within 8 m of that hen: it flaps, zigzags and squawks every 0.7 s for 2.6 s; the same hen cannot do it again for about 10 s. The masquerade turns to look at the squawk for 2.4 s (then goes back to its patrol), at most once per 5 s, and only when it is not busy or suspicious. A popup says "A chicken is giving you away!". Only in the hunt. Numbers in `CHICKEN_CONFIG` and `SEEKER_CONFIG.glance*`.
+- The squawk is synthesized (`audio.squawk`), a placeholder: a real hen squawk recording should replace it (still no Freesound key in this shell).
+- Tested: hen 2 m from the player and the masquerade 6 m from the hen = panic, 3 squawks in 1.5 s, masquerade facing the hen within 7 degrees; masquerade 10 m away = nothing; hen 4 m from the player = nothing; repeat inside the cooldown = nothing; prep (masquerade blind) = nothing; popup shown. 3 full runs, no console errors, production bundle clean.

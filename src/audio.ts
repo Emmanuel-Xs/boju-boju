@@ -49,9 +49,9 @@ const MUTE_KEY = 'boju.muted';
  */
 export const MIX_CONFIG = {
   /** Starting level of each channel (the player can still change it with setVolume). */
-  channels: { chant: 1, music: 0.5, ambience: 0.6, sfx: 0.8 } as Record<Channel, number>,
+  channels: { chant: 1.15, music: 0.3, ambience: 0.35, sfx: 0.65 } as Record<Channel, number>,
   /** While any chant line plays, these channels drop to this fraction of their level. */
-  duck: { ambience: 0.35, music: 0.35, sfx: 0.6 } as Partial<Record<Channel, number>>,
+  duck: { ambience: 0.15, music: 0.15, sfx: 0.4 } as Partial<Record<Channel, number>>,
   duckAttackSeconds: 0.12,
   duckReleaseSeconds: 0.9,
   /** The gap between two chant lines is shorter than this, so the ambience does not swell back in it. */
@@ -583,6 +583,64 @@ class AudioManager {
   /** Where the mix stands right now (for tests): each channel's duck multiplier. */
   mixSnapshot(): Record<Channel, number> {
     return Object.fromEntries(CHANNELS.map((ch) => [ch, this.duckGain[ch] ? +this.duckGain[ch].gain.value.toFixed(3) : 1])) as Record<Channel, number>;
+  }
+
+  // --- a hen's squawk, synthesized (a real recording should replace it): a harsh, wobbling rise and fall with a rasp of noise
+
+  squawk(x: number, z: number, volume = 0.5): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const dur = 0.34;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(volume, t + 0.03);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.setValueAtTime(1500, t);
+    band.frequency.linearRampToValueAtTime(900, t + dur);
+    band.Q.value = 1.6;
+    const panner = ctx.createPanner();
+    panner.panningModel = 'equalpower';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 2;
+    panner.maxDistance = 30;
+    panner.rolloffFactor = 1.3;
+    setPannerPosition(panner, x, 0.3, z);
+    band.connect(out).connect(panner).connect(this.channelGain.sfx);
+    const voice = (type: OscillatorType, f0: number, f1: number, level: number) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.45);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t + dur);
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 38;
+      const depth = ctx.createGain();
+      depth.gain.value = f0 * 0.09;
+      lfo.connect(depth).connect(o.frequency);
+      const g = ctx.createGain();
+      g.gain.value = level;
+      o.connect(g).connect(band);
+      o.start(t);
+      lfo.start(t);
+      o.stop(t + dur + 0.02);
+      lfo.stop(t + dur + 0.02);
+    };
+    voice('sawtooth', 620, 980, 0.5);
+    voice('square', 930, 1400, 0.22);
+    const n = ctx.createBufferSource();
+    const nb = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+    const d = nb.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.35;
+    n.buffer = nb;
+    n.connect(band);
+    n.start(t);
+    window.setTimeout(() => {
+      out.disconnect();
+      panner.disconnect();
+    }, (dur + 0.2) * 1000);
   }
 
   // --- drum roll: the warning before the masquerade's spin sweep

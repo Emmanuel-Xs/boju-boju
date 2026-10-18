@@ -99,6 +99,10 @@ export const SEEKER_CONFIG = {
   /** The player counts as having a near miss inside the cone and visible, at most this far away (m). */
   nearMissRange: 8,
 
+  // --- chickens that snitch: how long it stares where the squawk came from (s), and how long before another squawk can turn its head
+  glanceSeconds: 2.4,
+  glanceCooldown: 5,
+
   // --- cheating
   cheatInterval: 15, // s
   cheatCandidates: 3, // the nearest spots to the player's actual position; one of them is checked
@@ -188,6 +192,7 @@ export class Seeker {
   private trailSeen = 0;
   private printT = 0;
   private curiousT = 0;
+  private glanceT = 0;
   private chaseT = 0;
   private cheatTimer = 0;
   private noiseTimer = 0;
@@ -371,6 +376,7 @@ export class Seeker {
     const cfg = this.cfg;
     dt = Math.min(dt, 0.05);
     this.noiseTimer = Math.max(0, this.noiseTimer - dt);
+    this.glanceT = Math.max(0, this.glanceT - dt);
     this.cheatTimer += dt;
     this.patrol.tick(dt);
     this.eye.set(this.pos.x + Math.sin(this.yaw) * 0.12, cfg.eyeHeight, this.pos.z + Math.cos(this.yaw) * 0.12);
@@ -552,6 +558,21 @@ export class Seeker {
   }
   get spinWarning(): boolean {
     return this.state === 'spin_wind';
+  }
+
+  /** Turns to look at something (a snitching chicken). Returns whether it did: it ignores this when busy, suspicious or on cooldown. */
+  glance(x: number, z: number): boolean {
+    const cfg = this.cfg;
+    if (this.blind || this.frustrated || this.glanceT > 0 || this.suspicion >= cfg.leanAt) return false;
+    const calm = this.state === 'patrol_walk' || this.state === 'patrol_look' || this.state === 'check_walk' || this.state === 'check_look' || this.state === 'investigate_walk' || this.state === 'investigate_look';
+    if (!calm || this.chasing) return false;
+    this.glanceT = cfg.glanceCooldown;
+    this.trailId = null;
+    this.curStop = null;
+    this.lookAt = new THREE.Vector3(x, 0, z);
+    this.startLook('investigate_look');
+    this.lookDur = cfg.glanceSeconds;
+    return true;
   }
 
   /** The player is inside the cone, visible, and close, but not caught: a near miss (scores points). */

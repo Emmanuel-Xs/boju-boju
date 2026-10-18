@@ -301,16 +301,16 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (ambienceOn) return;
     ambienceOn = true;
     void audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS]).then(() => {
-      void audio.loop('amb_market', { volume: 0.85 });
+      void audio.loop('amb_market', { volume: 0.28 });
       const g = level.generator;
-      void audio.loop('amb_generator', { volume: 1, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
+      void audio.loop('amb_generator', { volume: 0.55, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
       const rooster = () => {
-        void audio.playOnce('sfx_rooster_01', { volume: 0.45, distant: { gain: 0.6 } });
+        void audio.playOnce('sfx_rooster_01', { volume: 0.3, distant: { gain: 0.6 } });
         window.setTimeout(rooster, 12000 + Math.random() * 18000);
       };
       window.setTimeout(rooster, 5000 + Math.random() * 6000);
       const horn = () => {
-        void audio.playOnce(HORN_CLIPS[Math.floor(Math.random() * HORN_CLIPS.length)], { volume: 0.8 }); // distant by default
+        void audio.playOnce(HORN_CLIPS[Math.floor(Math.random() * HORN_CLIPS.length)], { volume: 0.5 }); // distant by default
         window.setTimeout(horn, 18000 + Math.random() * 30000);
       };
       window.setTimeout(horn, 9000 + Math.random() * 9000);
@@ -670,7 +670,15 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       seekerLastX = seeker.position.x;
       seekerLastZ = seeker.position.z;
     }
-    chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])]);
+    const squawks = chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])], {
+      active: mode === 'hunt' && !!seeker && !seeker.blind && !seeker.frustrated,
+      player: pos,
+      seeker: seeker ? seeker.position : null,
+    });
+    for (const sq of squawks) {
+      void audio.squawk(sq.x, sq.z);
+      if (sq.first && seeker?.glance(sq.x, sq.z)) roundHud.popup('A chicken is giving you away!', '#ffb347', 2);
+    }
     prints.update(dt);
 
     // flow
