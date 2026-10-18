@@ -59,3 +59,9 @@ Compound level (`src/levels/compound.ts`), procedural player and egungun masquer
 - Whole game in `dist/`: 116 files, 3.43 MB uncompressed (limits: 100 MB, 25 MB per file, 2000 files). First load to the lobby: 1.21 MB transferred in 51 requests (vite preview compresses; start.ng's server may not), so even uncompressed it cannot pass 3.4 MB, under the 5 MB budget. Biggest files: `amb_generator.ogg` 281 KB, game chunk 144 KB, three.js chunk about 640 KB uncompressed.
 **Not verified:** real device fps and the auto-quality thresholds on a real phone; audio by ear; touch feel; how start.ng's server compresses.
 **Open:** nothing blocks publishing. Waiting for the go to call `/games/publish`.
+
+## Fix: leaderboard only saved when caught (dev branch)
+- Cause: the score was sent only when a run ended in a catch. Clearing rounds and leaving, or just stopping, saved nothing.
+- Fix: the run so far is saved after every cleared round (the board keeps each player's best, so this is safe). Saves queue in order. The results screen no longer says "Not your best" when this run already set the best.
+- Test: mock start.ng received `{"rounds":1,"hidden":5,"camo":0}` right after clearing round 1 with no catch. Three full runs in headless Chrome, no console errors. Production bundle loads and starts a round clean.
+- Workflow from now on: all work on `dev`; merge into `main` only after release + check-assets + /games/check (branch=dev) + three runs pass.

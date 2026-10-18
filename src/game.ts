@@ -210,6 +210,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   let board: BoardEntry[] | null = null;
   let best: BestRun | null = null;
   let lastScore = '';
+  /** Saves queue up one after another so a slow reply can't land after a newer one. */
+  let saveChain: Promise<unknown> = Promise.resolve();
+  let savedBest = false;
   const sense = { position: pos, speed: 0, landed: false, camo: 0, pose: null as string | null };
 
   const refreshBoard = async () => {
@@ -289,6 +292,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     round = 1;
     runStats = newStats();
     lastScore = '';
+    savedBest = false;
     screens.hideAll();
     startRound();
   }
@@ -363,12 +367,25 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     hopT = 0;
     runStats.rounds++;
     runStats.points += cfg.clearPoints;
+    saveProgress(); // a cleared round counts even if the player never gets caught or closes the tab
     roundHud.banner(`ROUND ${round} CLEARED!`, '#1c7a3a55');
     fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.4, pos.z), G.celebrateColors, 90);
     void audio.playOnce('jingle_win', { volume: 0.8 });
     audio.setSuspicion(0);
     if (seeker) seeker.frustrated = true;
     hiding.clearPose();
+  }
+
+  /** Sends the run so far. The board keeps each player's best run, so saving after every cleared round is safe. */
+  function saveProgress(): Promise<Awaited<ReturnType<typeof net.submit>> | null> {
+    const snapshot = { ...runStats };
+    const next = saveChain.then(async () => {
+      const res = await net.submit(snapshot);
+      if (res.improved) savedBest = true;
+      return res;
+    }).catch(() => null);
+    saveChain = next;
+    return next;
   }
 
   function startCatch() {
@@ -404,9 +421,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     const verdict = verdictFor(runStats);
     void audio.playOnce('jingle_caught', { volume: 0.6 });
     void (async () => {
-      const res = await net.submit(runStats);
+      const res = await saveProgress();
       await refreshBoard();
-      lastScore = res.message;
+      lastScore = res ? (res.saved && !res.improved && savedBest ? res.message.replace(/^Not your best this time\./, 'Saved.') : res.message) : '';
       if (mode === 'results') screens.showResults(runStats, verdict, lastScore, board, identity.id, !identity.signedIn && net.signInUrl() !== null);
     })();
     screens.showResults(runStats, verdict, '', board, identity.id, !identity.signedIn && net.signInUrl() !== null);
