@@ -16,7 +16,7 @@ import { createRoundHud } from './levels/roundHud';
 import { TopDownCamera } from './levels/topdown';
 import { difficultyFor, newStats, RUN_CONFIG, verdictFor, type RunStats } from './run';
 import { Seeker } from './seeker';
-import { localNet, type BestRun, type Net } from './startng';
+import { canTalkToStartNg, localNet, type BestRun, type Net } from './startng';
 import { Screens, type BoardEntry } from './ui';
 
 const DEV = import.meta.env.DEV;
@@ -186,8 +186,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   const sense = { position: pos, speed: 0, landed: false, camo: 0, pose: null as string | null };
 
   const refreshBoard = async () => {
-    best = await net.best();
     board = await net.board();
+    best = await net.best(); // after the board: a signed-in player's best run is read from their own row
   };
 
   const screens = new Screens({
@@ -206,7 +206,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   });
 
   function showLobby() {
-    screens.showLobby(identity, best, board, net.signInUrl() !== null);
+    screens.showLobby(identity, best, board, net.signInUrl() !== null && !q.has('guest')); // ?guest means the player already chose to play as a guest
   }
 
   function restoreLook() {
@@ -396,7 +396,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   async function refreshIdentity() {
     const next = await net.refresh();
     if (!next) return;
-    const changed = JSON.stringify(next.style) !== JSON.stringify(identity.style) || next.id !== identity.id || next.name !== identity.name;
+    const changed = JSON.stringify(next.style) !== JSON.stringify(identity.style) || next.id !== identity.id || next.name !== identity.name || next.signedIn !== identity.signedIn || next.face !== identity.face;
     identity = next;
     if (!changed) return;
     scene.remove(player.group);
@@ -586,10 +586,14 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     }
   }
 
-  // --- start in the lobby
-  await refreshBoard();
+  // --- start in the lobby (the board loads in the background: the game never waits for start.ng)
   loading.remove();
   enterLobby();
+  // start.ng may answer late (a slow connect page): ask again shortly after, then rely on focus / visibility
+  if (identity.source === 'local guest' && canTalkToStartNg()) {
+    window.setTimeout(() => void refreshIdentity(), 3000);
+    window.setTimeout(() => void refreshIdentity(), 8000);
+  }
 
   // --- frame loop
   let last = performance.now();

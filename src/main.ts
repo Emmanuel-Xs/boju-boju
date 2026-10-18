@@ -6,5 +6,5 @@ const params = new URLSearchParams(location.search);
 if (import.meta.env.DEV && params.has('debug')) {
   void import('./debugScene').then((m) => m.startDebugScene());
 } else {
-  void import('./game').then((m) => m.startGame());
+  void Promise.all([import('./game'), import('./startng')]).then(([game, net]) => game.startGame(net.startNgNet()));
 }

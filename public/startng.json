@@ -1,0 +1,9 @@
+{
+  "leaderboard": {
+    "stats": [
+      { "key": "rounds", "label": "Rounds survived", "order": "highest" },
+      { "key": "hidden", "label": "Time hidden", "order": "highest", "format": "time" },
+      { "key": "camo", "label": "Best camo %", "order": "highest" }
+    ]
+  }
+}

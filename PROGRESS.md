@@ -29,3 +29,20 @@ Compound level (`src/levels/compound.ts`), procedural player and egungun masquer
 **Open**
 - Identity, leaderboard and score saving are still the local fallback (`src/startng.ts`): Phase 2.
 - `cover.png`, loading bar, auto quality, dev-gating of the remaining debug overlays (markers, stats, AI text are already DEV-only): Phase 3.
+
+## Phase 2: start.ng integration (done)
+**What changed**
+- `src/startng.ts`: the docs' `connectFrame` / `askStartNg` helper (origin and source checked on every reply). `startng:whoami` on load, on `focus` and on `visibilitychange`; `startng:leaderboard` (asks for 50 rows, lobby and results show the top 10); `startng:score` at the end of each run.
+- Signed in: character from `user.style`, `user.name`, `@user.account`, `user.face` (a PNG data URL, validated before use; otherwise a face is drawn). Guest: the `guest` look and name. No reply: local guest, never blocks (whoami cap 2.5 s, and the board loads in the background); it asks again at 3 s and 8 s and on focus.
+- `?guest` in the URL hides the lobby sign-in button; otherwise guests get "Sign in to save your score" (`https://start.ng/?return_to=...`). The results screen always invites guests to sign in and shows the board.
+- `public/startng.json` (ships in `dist/`): `rounds` "Rounds survived" (highest), `hidden` "Time hidden" (highest, `time` format, whole seconds), `camo` "Best camo %" (highest). Score messages send exactly those three whole numbers, 0 to 1e9. Results show improved and rank; the player's row is highlighted by `player_id` in lobby and results. A signed-in player's best run is read from their own board row.
+- `scripts/mock-startng.mjs`: a stand-in connect page for local testing (`node scripts/mock-startng.mjs`, then `?startng=http://localhost:5174` on the dev server; that override is compiled out of production).
+- Names, accounts and faces only enter the DOM through `textContent` / validated `img.src`.
+**Tests (headless Chrome, against the mock)**
+- Signed in: lobby shows Runner Tee, @Hamzat, the mock's face, best run read from the board row (5 rounds, 6:41, 94%), top-10 board with the own row highlighted; character from the style (`#a55eea`, braids, crown, earrings); after a run the mock received exactly `{"rounds":0,"hidden":4,"camo":0}` and the results said "Not your best this time. You are #2 with 5 rounds."
+- Guest: guest look, sign-in button present, absent with `?guest`; results invite sign-in.
+- Silent start.ng: lobby appears with a local guest, no blocking (5.2 s versus 7.3 s page load in software rendering), run and results work.
+- Focus and visibilitychange: signing in on "another tab" switched the character from the guest look to the signed-in one and back, with no reload.
+- No console errors or warnings in any of these.
+**Not verified:** the real start.ng connect page and real leaderboard (the game can only talk to them once it is live on `*.start.ng`); the real `user.face` image; the `no_start_ng_player` warning clearing (checked against the pushed repo below).
+**Open:** cover, loading bar, auto quality, final gating (Phase 3).
