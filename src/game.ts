@@ -2,7 +2,8 @@
 //   Flow: lobby -> prep (the masquerade counts, eyes covered) -> hunt -> cleared (next round, sharper masquerade) or caught (results). Esc pauses.
 // DEV-only URL knobs (dev server only): &prep=SECONDS &hunt_s=SECONDS &markers=1 &ai=1 &stats=1 &seeker=0 &at=x,z &view=overview|top &camPos=x,y,z&camLook=x,y,z
 import * as THREE from 'three';
-import { audio } from './audio';
+import { audio, HORN_CLIPS, LAND_CLIPS, STEP_NAMES, UI_CLIPS } from './audio';
+import { Stepper } from './footsteps';
 import { mountAudioDebug } from './audioDebug';
 import { createCharacter, type Character, type PlayerState } from './character';
 import { Fx, applyPixelRatio } from './fx';
@@ -73,7 +74,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   loadText.style.cssText = 'font:600 14px system-ui,sans-serif;opacity:.9';
   loadText.textContent = 'Loading the compound…';
   loading.append(loadTitle, loadBar, loadText);
-  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught'] as const;
+  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS] as const;
   let loaded = 0;
   const loadTotal = COMPOUND_ASSET_COUNT + LOAD_CLIPS.length;
   const tickLoad = () => {
@@ -235,6 +236,15 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     },
   });
 
+  // menu buttons click (lobby, results, pause); in the hunt the HUD buttons stay silent
+  document.addEventListener('click', (e) => {
+    const b = (e.target as Element | null)?.closest('button');
+    if (!b || !(mode === 'lobby' || mode === 'results' || paused)) return;
+    const label = b.textContent?.trim().toLowerCase() ?? '';
+    const clip = /^(play|again|play again)/.test(label) ? 'sfx_ui_confirm_01' : /^(quit|back|lobby|resume)/.test(label) ? 'sfx_ui_back_01' : 'sfx_ui_click_01';
+    void audio.unlock().then(() => audio.playOnce(clip, { volume: 0.5 }));
+  });
+
   function showLobby() {
     screens.showLobby(identity, best, board, net.signInUrl() !== null && !q.has('guest')); // ?guest means the player already chose to play as a guest
   }
@@ -274,15 +284,20 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   function startAmbience() {
     if (ambienceOn) return;
     ambienceOn = true;
-    void audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught']).then(() => {
-      void audio.loop('amb_market', { volume: 0.22 });
+    void audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS]).then(() => {
+      void audio.loop('amb_market', { volume: 0.85 });
       const g = level.generator;
       void audio.loop('amb_generator', { volume: 1, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
       const rooster = () => {
-        void audio.playOnce('sfx_rooster_01', { volume: 0.7, distant: { gain: 0.6 } });
+        void audio.playOnce('sfx_rooster_01', { volume: 0.45, distant: { gain: 0.6 } });
         window.setTimeout(rooster, 12000 + Math.random() * 18000);
       };
       window.setTimeout(rooster, 5000 + Math.random() * 6000);
+      const horn = () => {
+        void audio.playOnce(HORN_CLIPS[Math.floor(Math.random() * HORN_CLIPS.length)], { volume: 0.8 }); // distant by default
+        window.setTimeout(horn, 18000 + Math.random() * 30000);
+      };
+      window.setTimeout(horn, 9000 + Math.random() * 9000);
     });
   }
 
@@ -370,7 +385,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     saveProgress(); // a cleared round counts even if the player never gets caught or closes the tab
     roundHud.banner(`ROUND ${round} CLEARED!`, '#1c7a3a55');
     fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.4, pos.z), G.celebrateColors, 90);
-    void audio.playOnce('jingle_win', { volume: 0.8 });
+    void audio.playOnce('jingle_win', { volume: 0.5 });
     audio.setSuspicion(0);
     if (seeker) seeker.frustrated = true;
     hiding.clearPose();
@@ -396,7 +411,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     timeScale = cfg.slowMoScale;
     caughtDone = false;
     void audio.unlock().then(async () => {
-      const v = await audio.playOnce('caught', { volume: 0.9 });
+      const v = await audio.playOnce('caught', { volume: 1 });
       lyrics.sing('caught', v?.duration ?? 0.9);
     });
   }
@@ -419,7 +434,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     runStats.bestCamo = Math.round(runStats.bestCamo);
     runStats.points = Math.round(runStats.points);
     const verdict = verdictFor(runStats);
-    void audio.playOnce('jingle_caught', { volume: 0.6 });
+    void audio.playOnce('jingle_caught', { volume: 0.75 });
     void (async () => {
       const res = await saveProgress();
       await refreshBoard();
@@ -506,6 +521,10 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   player.play('idle', 0.01);
   let yaw = 0;
   let wasGrounded = true;
+  const playerSteps = new Stepper('player');
+  const seekerSteps = new Stepper('seeker');
+  let seekerLastX = 0;
+  let seekerLastZ = 0;
 
   if (seeker) {
     seeker.onCatchStart = startCatch;
@@ -550,9 +569,11 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     const res = body.update(raw, dt, level.colliders, level.bounds);
     const turn = 1 - Math.exp(-dt * 16);
     if (res.heading !== null) yaw += Math.atan2(Math.sin(res.heading - yaw), Math.cos(res.heading - yaw)) * turn;
+    playerSteps.advance(dt, pos.x, pos.z, res.speed, res.grounded);
     const airborne = !res.grounded;
     const landed = res.grounded && !wasGrounded;
     wasGrounded = res.grounded;
+    if (landed && mode !== 'cleared') void audio.playOnce(LAND_CLIPS[Math.floor(Math.random() * LAND_CLIPS.length)], { volume: 0.35 });
     const moving = res.speed > 0.35 || airborne;
     const held = hiding.update(dt, { speed: moving ? Math.max(res.speed, airborne ? WALK_SPEED : 0) : 0, yaw });
     if (held.yaw !== null) yaw += Math.atan2(Math.sin(held.yaw - yaw), Math.cos(held.yaw - yaw)) * turn;
@@ -573,6 +594,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       sense.camo = hiding.camo.breakdown.total;
       sense.pose = hiding.pose;
       seeker.update(dt, sense);
+      if (dt > 0) seekerSteps.advance(dt, seeker.position.x, seeker.position.z, Math.hypot(seeker.position.x - seekerLastX, seeker.position.z - seekerLastZ) / dt);
+      seekerLastX = seeker.position.x;
+      seekerLastZ = seeker.position.z;
     }
     chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])]);
 

@@ -267,7 +267,7 @@ export class HidingController {
     this.camo.invalidate();
     const y = (SPLASH_Y[this.pose ?? ''] ?? [1.25, 0.6])[this.zone === 'top' ? 0 : 1];
     fx.paintSplash(this.torso.set(pos.x, pos.y + y, pos.z), r.color);
-    void audio.unlock().then(() => audio.playOnce('sfx_paint', { volume: 0.9 }));
+    void audio.unlock().then(() => audio.playOnce('sfx_paint', { volume: 0.6 }));
     this.hud.toast(`${this.zone} painted ${r.label} #${r.color.getHexString()}`);
   }
 

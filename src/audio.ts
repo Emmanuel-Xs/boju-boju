@@ -8,7 +8,10 @@ export const CHANT_CLIPS = ['chant_intro', 'chant_ask', 'chant_not_yet', 'chant_
 export const MUSIC_CLIPS = ['drum_loop'] as const;
 export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
 export const HORN_CLIPS = ['sfx_horn_motorbike_01', 'sfx_horn_motorbike_02'] as const;
-export const SFX_CLIPS = [...HORN_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught'] as const;
+export const STEP_NAMES = (['concrete', 'sand'] as const).flatMap((s) => [1, 2, 3, 4, 5].map((i) => `sfx_step_${s}_0${i}` as const));
+export const UI_CLIPS = ['sfx_ui_click_01', 'sfx_ui_click_02', 'sfx_ui_confirm_01', 'sfx_ui_back_01'] as const;
+export const LAND_CLIPS = ['sfx_hit_soft_01', 'sfx_hit_soft_02'] as const;
+export const SFX_CLIPS = [...HORN_CLIPS, ...LAND_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS] as const;
 export type ClipName =
   | (typeof CHANT_CLIPS)[number]
   | (typeof MUSIC_CLIPS)[number]
@@ -31,12 +34,40 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   sfx_paint: 'sfx',
   jingle_win: 'sfx',
   jingle_caught: 'sfx',
+  ...(Object.fromEntries([...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS].map((n) => [n, 'sfx'])) as Record<(typeof STEP_NAMES)[number] | (typeof UI_CLIPS)[number] | (typeof LAND_CLIPS)[number], Channel>),
 };
 
 /** Clips that always sound far away unless the caller says `distant: false`. */
 const DEFAULT_DISTANT = new Set<ClipName>(HORN_CLIPS);
 
 const MUTE_KEY = 'boju.muted';
+
+/**
+ * The mix. Clip loudness was measured (EBU R128, see PROGRESS.md): chant lines sit near -16 LUFS and everything else is set under them,
+ * ambience lowest. While a chant line plays, the other channels duck so the Yoruba stays clear.
+ */
+export const MIX_CONFIG = {
+  /** Starting level of each channel (the player can still change it with setVolume). */
+  channels: { chant: 1, music: 0.5, ambience: 0.6, sfx: 0.8 } as Record<Channel, number>,
+  /** While any chant line plays, these channels drop to this fraction of their level. */
+  duck: { ambience: 0.35, music: 0.35, sfx: 0.6 } as Partial<Record<Channel, number>>,
+  duckAttackSeconds: 0.12,
+  duckReleaseSeconds: 0.9,
+  /** The gap between two chant lines is shorter than this, so the ambience does not swell back in it. */
+  duckHoldSeconds: 0.45,
+  /** Safety limiter on the master output, for the loudest stingers. */
+  limiter: { threshold: -3, knee: 0, ratio: 20, attack: 0.003, release: 0.12 },
+  heart: {
+    /** Output level of the heartbeat (its own bus, so chant ducking does not touch it). */
+    level: 0.5,
+    /** Share of the full level when suspicion first appears. */
+    minShare: 0.3,
+    /** Low body of the beat, and the upper knock that lets phone and laptop speakers play it. */
+    bodyHz: 56,
+    knockHz: 130,
+    knockShare: 0.6,
+  },
+};
 
 export interface Voice {
   readonly name: string;
@@ -109,6 +140,8 @@ interface PlayOptions {
   distant?: boolean | DistantOptions;
   loop?: boolean;
   volume?: number;
+  /** Playback speed (also changes pitch). Default 1. */
+  rate?: number;
   fadeIn?: number;
   /** Place the clip in the world; it pans and fades relative to `setListener`. */
   spatial?: SpatialOptions;
@@ -213,7 +246,11 @@ class AudioManager {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
   private channelGain = {} as Record<Channel, GainNode>;
-  private volumes: Record<Channel, number> = { chant: 1, music: 0.7, ambience: 0.6, sfx: 1 };
+  private duckGain = {} as Record<Channel, GainNode>;
+  private heartBus!: GainNode;
+  private chantVoices = 0;
+  private duckHold: number | null = null;
+  private volumes: Record<Channel, number> = { ...MIX_CONFIG.channels };
   private muted = false;
 
   private buffers = new Map<string, Promise<AudioBuffer | null>>();
@@ -248,13 +285,25 @@ class AudioManager {
       this.ctx = new Ctor();
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : 1;
-      this.master.connect(this.ctx.destination);
+      const lim = this.ctx.createDynamicsCompressor();
+      const L = MIX_CONFIG.limiter;
+      lim.threshold.value = L.threshold;
+      lim.knee.value = L.knee;
+      lim.ratio.value = L.ratio;
+      lim.attack.value = L.attack;
+      lim.release.value = L.release;
+      this.master.connect(lim).connect(this.ctx.destination);
       for (const ch of CHANNELS) {
         const g = this.ctx.createGain();
         g.gain.value = this.volumes[ch];
-        g.connect(this.master);
+        const d = this.ctx.createGain();
+        g.connect(d).connect(this.master);
         this.channelGain[ch] = g;
+        this.duckGain[ch] = d;
       }
+      this.heartBus = this.ctx.createGain();
+      this.heartBus.gain.value = MIX_CONFIG.heart.level;
+      this.heartBus.connect(this.master);
     }
     if (this.ctx.state !== 'running') await this.ctx.resume();
   }
@@ -387,6 +436,7 @@ class AudioManager {
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = opts.loop ?? false;
+    if (opts.rate) src.playbackRate.value = opts.rate;
     const gain = ctx.createGain();
     const target = opts.volume ?? 1;
     const now = ctx.currentTime;
@@ -456,8 +506,10 @@ class AudioManager {
     };
     entry.voice = voice;
     this.voices.add(entry);
+    if (channel === 'chant') this.chantStarted();
     src.onended = () => {
       this.voices.delete(entry);
+      if (channel === 'chant') this.chantEnded();
       src.disconnect();
       resolveEnded();
       // let the reverb tail ring out before tearing the chain down
@@ -495,6 +547,40 @@ class AudioManager {
   async crossfade(a: ClipName, b: ClipName, seconds = 2): Promise<Voice | null> {
     this.stop(a, seconds);
     return this.loop(b, { fadeIn: seconds });
+  }
+
+  // --- ducking: the chant is the loudest thing in the game, so the rest steps back while it plays
+
+  private duckTo(down: boolean): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const seconds = down ? MIX_CONFIG.duckAttackSeconds : MIX_CONFIG.duckReleaseSeconds;
+    for (const ch of CHANNELS) {
+      const g = this.duckGain[ch].gain;
+      g.cancelScheduledValues(t);
+      g.setTargetAtTime(down ? (MIX_CONFIG.duck[ch] ?? 1) : 1, t, seconds / 3);
+    }
+  }
+
+  private chantStarted(): void {
+    this.chantVoices++;
+    if (this.duckHold !== null) window.clearTimeout(this.duckHold);
+    this.duckHold = null;
+    this.duckTo(true);
+  }
+
+  private chantEnded(): void {
+    this.chantVoices = Math.max(0, this.chantVoices - 1);
+    if (this.chantVoices > 0) return;
+    this.duckHold = window.setTimeout(() => {
+      this.duckHold = null;
+      if (this.chantVoices === 0) this.duckTo(false);
+    }, MIX_CONFIG.duckHoldSeconds * 1000);
+  }
+
+  /** Where the mix stands right now (for tests): each channel's duck multiplier. */
+  mixSnapshot(): Record<Channel, number> {
+    return Object.fromEntries(CHANNELS.map((ch) => [ch, this.duckGain[ch] ? +this.duckGain[ch].gain.value.toFixed(3) : 1])) as Record<Channel, number>;
   }
 
   // --- chant sequencer
@@ -582,27 +668,34 @@ class AudioManager {
       return;
     }
     const s = this.suspicion;
-    const vol = 0.15 + 0.85 * s;
+    const H = MIX_CONFIG.heart;
+    const vol = H.minShare + (1 - H.minShare) * s;
     const t = ctx.currentTime;
-    this.thump(t, 58, vol);
-    this.thump(t + 0.17 - 0.05 * s, 46, vol * 0.7);
+    this.thump(t, H.bodyHz, H.knockHz, vol);
+    this.thump(t + 0.17 - 0.05 * s, H.bodyHz * 0.82, H.knockHz * 0.85, vol * 0.7);
     const period = 1.1 - 0.75 * s; // ~55 bpm calm, ~170 bpm panicked
     this.heartTimer = window.setTimeout(() => this.beat(), period * 1000);
   }
 
-  private thump(t: number, freq: number, gain: number): void {
+  /** One beat: a low body plus a short higher knock, so it is heard on small speakers and not only felt on big ones. */
+  private thump(t: number, body: number, knock: number, gain: number): void {
     const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq * 1.6, t);
-    osc.frequency.exponentialRampToValueAtTime(freq, t + 0.06);
-    g.gain.setValueAtTime(gain, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-    osc.connect(g).connect(this.channelGain.sfx);
-    osc.start(t);
-    osc.stop(t + 0.18);
-    osc.onended = () => g.disconnect();
+    const H = MIX_CONFIG.heart;
+    const voice = (hz: number, level: number, decay: number) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(hz * 1.6, t);
+      osc.frequency.exponentialRampToValueAtTime(hz, t + 0.06);
+      g.gain.setValueAtTime(level, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + decay);
+      osc.connect(g).connect(this.heartBus);
+      osc.start(t);
+      osc.stop(t + decay + 0.02);
+      osc.onended = () => g.disconnect();
+    };
+    voice(body, gain, 0.16);
+    voice(knock, gain * H.knockShare, 0.07);
   }
 }
 

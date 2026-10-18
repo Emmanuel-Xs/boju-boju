@@ -65,3 +65,31 @@ Compound level (`src/levels/compound.ts`), procedural player and egungun masquer
 - Fix: the run so far is saved after every cleared round (the board keeps each player's best, so this is safe). Saves queue in order. The results screen no longer says "Not your best" when this run already set the best.
 - Test: mock start.ng received `{"rounds":1,"hidden":5,"camo":0}` right after clearing round 1 with no catch. Three full runs in headless Chrome, no console errors. Production bundle loads and starts a round clean.
 - Workflow from now on: all work on `dev`; merge into `main` only after release + check-assets + /games/check (branch=dev) + three runs pass.
+
+## Phase 4: sound pass (dev branch)
+**Done**
+- Mix (`MIX_CONFIG` in `src/audio.ts`): chant at full level, everything else measured and set under it. Estimated levels (clip LUFS + gain stack): chant lines about -16 LUFS; ambience about -32 (about -41 while a chant line plays); stingers about -20; rooster about -27.
+- Ducking: while any chant line plays, ambience and music fall to 35% and sfx to 60% (attack 0.12 s, release 0.9 s, 0.45 s hold between lines so ambience does not pump between lines). Verified in headless Chrome: duck values drop within 0.5 s of the first line, hold through the ask/not-yet loop, and return to 1 about 0.5 s after the last line.
+- Master limiter added (the win jingle peaks at +1.9 dBFS in its file).
+- Heartbeat: own bus (not ducked), a low body plus a 130 Hz knock so phone and laptop speakers can play it (the old 46-58 Hz sine could not be heard on small speakers); starts at 30% level, climbs with suspicion.
+- Footsteps for the player (concrete on the yard, sand on the dirt patch and outside) and for the masquerade (placed in the world, pitched down 22%), from the Kenney CC0 clips already in the repo. Landing thud, menu clicks (Play/again = confirm, Quit/Resume/lobby = back), and occasional distant motorbike horns. These clips were in the repo but never played before.
+- No new files downloaded, so CREDITS.md is unchanged.
+
+**Blocked: FREESOUND_API_KEY is not set in this shell**, so nothing was fetched from Freesound. Export it for the session (`export FREESOUND_API_KEY=...`) and say so; `scripts/fetch-freesound.mjs` reads it from the environment only and uses preview-hq-ogg.
+
+**Not verified:** all of it by ear (levels are computed from measured clip loudness, not listened to), real-device speaker behaviour of the heartbeat, mobile audio unlock.
+
+**Placeholder chant lines to re-record, in order (YarnGPT2 stand-ins)**
+1. `chant_ask` "Ṣé kí n ṣí i?" 1.3 s, the Egungun. Heard about 10 times a round.
+2. `chant_not_yet` "Má ṣí i!" 0.7 s, the children. Heard about 10 times a round, so a weak read shows fastest.
+3. `chant_intro` "Bojú bojú o! Ẹ̀gúngún ń bọ̀! Ẹ sá pamọ́!" 3.7 s. Longest line, most tone marks, opens every round.
+4. `caught` "Mo rí ẹ!" 0.9 s. Heard on every run ending.
+5. `chant_open` "Ṣí i!" 0.5 s.
+6. `chant_hunt` "Ẹni tí mo bá rí, màá jẹ ẹ́!" 2.4 s.
+Record each as a dry mono WAV, no music or reverb. The English glosses under the lyrics are mine; a Yoruba speaker should check them too.
+
+**Sounds the game still lacks (needs the key to search, or a recording)**
+- Masquerade movement: raffia/cloth swish and ankle bells or rattle, looped while it walks (Freesound CC0: "raffia", "ankle bells", "shaker").
+- Chicken clucks and a startled squawk when the player runs past.
+- A short "spotted" sting for when the cone first catches you (a recorded "Ehn!" would fit).
+- Cloth rustle for striking a pose.
