@@ -585,6 +585,13 @@ export class Fx {
     return cone;
   }
 
+  /** Take a cone off its parent and stop updating it (e.g. when the masquerade's cone changes size). */
+  removeVisionCone(cone: VisionCone): void {
+    cone.mesh.parent?.remove(cone.mesh);
+    this.cones = this.cones.filter((c) => c !== cone);
+    cone.dispose();
+  }
+
   addSuspicionIndicator(parent: THREE.Object3D, height = 3.15): SuspicionIndicator {
     const ind = createIndicator();
     ind.mesh.position.y = height;

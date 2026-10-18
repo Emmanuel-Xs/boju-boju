@@ -8,7 +8,7 @@ export const CHANT_CLIPS = ['chant_intro', 'chant_ask', 'chant_not_yet', 'chant_
 export const MUSIC_CLIPS = ['drum_loop'] as const;
 export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
 export const HORN_CLIPS = ['sfx_horn_motorbike_01', 'sfx_horn_motorbike_02'] as const;
-export const SFX_CLIPS = [...HORN_CLIPS, 'sfx_rooster_01', 'sfx_paint'] as const;
+export const SFX_CLIPS = [...HORN_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught'] as const;
 export type ClipName =
   | (typeof CHANT_CLIPS)[number]
   | (typeof MUSIC_CLIPS)[number]
@@ -29,6 +29,8 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   sfx_horn_motorbike_02: 'sfx',
   sfx_rooster_01: 'sfx',
   sfx_paint: 'sfx',
+  jingle_win: 'sfx',
+  jingle_caught: 'sfx',
 };
 
 /** Clips that always sound far away unless the caller says `distant: false`. */
@@ -258,6 +260,15 @@ class AudioManager {
   }
 
   // --- volume / mute
+
+  /** Pause every sound (the game is paused). */
+  async suspend(): Promise<void> {
+    if (this.ctx && this.ctx.state === 'running') await this.ctx.suspend();
+  }
+
+  async resume(): Promise<void> {
+    if (this.ctx && this.ctx.state === 'suspended') await this.ctx.resume();
+  }
 
   isMuted(): boolean {
     return this.muted;

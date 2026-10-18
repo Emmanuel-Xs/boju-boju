@@ -280,8 +280,12 @@ export class Seeker {
   suspicion = 0;
   /** Called once when the seeker catches the player. */
   onCaught: (() => void) | null = null;
+  /** Called when the lunge starts (suspicion reached 1), a little before `onCaught`. */
+  onCatchStart: (() => void) | null = null;
   /** Eyes covered (the prep phase): it stands still singing and notices nothing. */
   blind = false;
+  /** Cleared round: it stands still, looking around in annoyance, and notices nothing. */
+  frustrated = false;
   readonly eye = new THREE.Vector3();
 
   private nav: Nav;
@@ -318,9 +322,10 @@ export class Seeker {
 
   constructor(
     private host: SeekerHost,
-    fx: Fx,
+    private fx: Fx,
     scene: THREE.Scene,
-    private cfg = SEEKER_CONFIG,
+    /** A private copy, so a run can sharpen this seeker without touching SEEKER_CONFIG. */
+    private cfg = { ...SEEKER_CONFIG },
   ) {
     this.masq = createMasquerade();
     this.group = this.masq.group;
@@ -339,6 +344,16 @@ export class Seeker {
     this.debugGroup.add(this.line);
     this.debugGroup.visible = false;
     this.reset();
+  }
+
+  /** Change tuning numbers on the fly (a harder round). The cone on the ground is redrawn if its size changed. */
+  applyDifficulty(patch: Partial<typeof SEEKER_CONFIG>): void {
+    const resize = (patch.visionFovDeg !== undefined && patch.visionFovDeg !== this.cfg.visionFovDeg) || (patch.visionRange !== undefined && patch.visionRange !== this.cfg.visionRange);
+    Object.assign(this.cfg, patch);
+    if (resize) {
+      this.fx.removeVisionCone(this.cone);
+      this.cone = this.fx.addVisionCone(this.group, this.cfg.visionRange, this.cfg.visionFovDeg);
+    }
   }
 
   setDebug(on: boolean): void {
@@ -463,8 +478,8 @@ export class Seeker {
       return;
     }
 
-    if (this.blind) {
-      this.anim = 'sing_eyes_covered';
+    if (this.blind || this.frustrated) {
+      this.anim = this.blind ? 'sing_eyes_covered' : 'look_around';
       this.speed = 0;
       this.suspicion = 0;
       this.path = [];
@@ -480,6 +495,7 @@ export class Seeker {
         this.state = 'catch';
         this.catchT = 0;
         this.path = [];
+        this.onCatchStart?.();
       } else if (this.suspicion >= cfg.leanAt && this.state !== 'suspicious') {
         this.state = 'suspicious';
         this.path = [];
@@ -570,6 +586,7 @@ export class Seeker {
   }
 
   private applyFx(): void {
+    this.cone.mesh.visible = !this.blind && !this.frustrated && this.state !== 'caught';
     this.cone.setSuspicion(this.suspicion);
     this.indicator.set(this.suspicion);
     audio.setSuspicion(this.suspicion);

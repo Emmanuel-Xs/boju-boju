@@ -61,7 +61,7 @@ export class HidingController {
   private hud;
   private hover: Reading | null = null;
   private sinceHover = 1;
-  private debugOn = true;
+  private debugOn = false; // the per-term camo text is a dev aid: C turns it on
   private torso = new THREE.Vector3();
 
   constructor(private o: HidingOptions) {
@@ -120,6 +120,37 @@ export class HidingController {
     this.hud.toast(msg);
   }
 
+  setPaletteTop(px: number): void {
+    this.hud.setPaletteTop(px);
+  }
+
+  /** Swap in a different character (the player signed in or out on start.ng). */
+  setPlayer(player: Character): void {
+    this.o.player = player;
+    this.camo.invalidate();
+  }
+
+  /** Escape was used to stop the eyedropper this key press, so the game shouldn't also pause. */
+  escUsed = false;
+
+  show(visible: boolean): void {
+    this.hud.show(visible);
+    if (!visible) this.aimOn = false;
+  }
+
+  /** New round: back to the player's start.ng clothes, no pose, nothing painted, the recent colours forgotten. */
+  resetPaint(top: THREE.ColorRepresentation, bottom: THREE.ColorRepresentation): void {
+    this.o.player.setZoneColor('top', top);
+    this.o.player.setZoneColor('bottom', bottom);
+    this.painted.top = this.painted.bottom = false;
+    this.recent = [];
+    this.hud.setRecent([]);
+    this.zone = 'top';
+    this.aimOn = false;
+    this.clearPose();
+    this.camo.invalidate();
+  }
+
   /** Drop any held pose (e.g. after being caught). */
   clearPose(): void {
     this.pose = null;
@@ -161,7 +192,10 @@ export class HidingController {
       this.hud.setDebugVisible(this.debugOn);
     } else if (e.code === 'KeyK') this.hud.toggleLegend();
     else if (e.code === 'KeyP') this.hud.togglePalette();
-    else if (e.code === 'Escape') this.aimOn = false;
+    else if (e.code === 'Escape' && this.aimOn) {
+      this.aimOn = false;
+      this.escUsed = true;
+    }
     else {
       const m = /^(?:Digit|Numpad)([1-4])$/.exec(e.code);
       if (m) this.setPose(POSES[Number(m[1]) - 1]);

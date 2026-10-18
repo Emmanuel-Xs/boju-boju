@@ -18,6 +18,10 @@ export interface Hud {
   setRecent(items: { color: THREE.Color; label: string }[]): void;
   toggleLegend(): void;
   togglePalette(): void;
+  /** Hide or show the whole painting HUD (the lobby and the results screen have none). */
+  show(visible: boolean): void;
+  /** Move the palette down to make room for the profile card. */
+  setPaletteTop(px: number): void;
 }
 
 export interface HudHandlers {
@@ -43,6 +47,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
   const panel = document.createElement('div');
   css(panel, 'position:absolute;top:8px;right:8px;width:260px;display:flex;flex-direction:column;gap:6px;align-items:stretch');
   root.appendChild(panel);
+  const narrow = () => innerWidth < 600;
 
   const meterBox = document.createElement('div');
   css(meterBox, 'background:#000a;border-radius:6px;padding:6px 8px');
@@ -60,7 +65,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
   meterBox.append(meterTop, bar, poseLine);
 
   const zoneBox = document.createElement('div');
-  css(zoneBox, 'display:flex;gap:8px;background:#000a;border-radius:6px;padding:6px 8px;align-items:center');
+  css(zoneBox, 'display:flex;flex-wrap:wrap;gap:4px 8px;background:#000a;border-radius:6px;padding:6px 8px;align-items:center');
   const swatches = {} as Record<PaintZone, { wrap: HTMLElement; chip: HTMLElement; note: HTMLElement }>;
   for (const zone of ['top', 'bottom'] as const) {
     const wrap = document.createElement('div');
@@ -149,18 +154,18 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     ['#e8dcb8', 'Cream plaster'], ['#a8322d', 'Door red'], ['#2a5db0', 'Drum blue'], ['#2f7d3a', 'Door green'],
   ];
   const palette = document.createElement('div');
-  css(palette, `position:absolute;left:${touch ? 8 : 74}px;top:8px;background:#000b;border-radius:8px;padding:8px 10px;width:176px;pointer-events:auto;display:${touch ? 'none' : 'block'}`);
+  css(palette, `position:absolute;left:${touch ? 8 : 74}px;top:8px;background:#000b;border-radius:8px;padding:8px 10px;width:${touch ? 'fit-content' : '176px'};pointer-events:auto;display:${touch ? 'none' : 'block'}`);
   const palTitle = document.createElement('div');
   css(palTitle, 'font:700 12px system-ui;margin-bottom:6px;display:flex;justify-content:space-between');
   palTitle.innerHTML = '<span>Palette</span><span style="opacity:.6;font-weight:500">P</span>';
   const grid = document.createElement('div');
-  css(grid, 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px');
+  css(grid, `display:grid;grid-template-columns:repeat(4,${touch ? '46px' : '1fr'});gap:6px`);
   const bright = document.createElement('input');
   bright.type = 'range';
   bright.min = '45';
   bright.max = '150';
   bright.value = '100';
-  css(bright, 'width:100%;margin:8px 0 0;accent-color:#f1c232');
+  css(bright, `width:100%;margin:8px 0 0;accent-color:#f1c232;height:${touch ? 44 : 16}px;touch-action:none`);
   const brightLabel = Object.assign(document.createElement('div'), { textContent: 'Brightness' });
   css(brightLabel, 'font:11px system-ui;opacity:.75;margin-top:6px');
   const shown = (c: string) => {
@@ -170,7 +175,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
   const swatchButtons: [HTMLButtonElement, string][] = [];
   for (const [c, name] of PALETTE) {
     const b = document.createElement('button');
-    css(b, 'height:30px;border-radius:6px;border:2px solid #fffb;cursor:pointer;padding:0');
+    css(b, `height:${touch ? 46 : 30}px;border-radius:6px;border:2px solid #fffb;cursor:pointer;padding:0`);
     b.title = `${name} ${c}`;
     b.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -206,13 +211,28 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
   const togglePalette = () => {
     palette.style.display = palette.style.display === 'none' ? 'block' : 'none';
   };
+  // phones: the meter and swatches sit under the profile card on the left, so the round bar has the top right to itself
+  const layout = () => {
+    if (narrow()) {
+      panel.style.cssText = 'position:absolute;top:60px;left:8px;width:158px;display:flex;flex-direction:column;gap:6px;align-items:stretch';
+      palette.style.left = '8px';
+      palette.style.top = '300px';
+    } else {
+      panel.style.cssText = 'position:absolute;top:8px;right:8px;width:260px;display:flex;flex-direction:column;gap:6px;align-items:stretch';
+      palette.style.left = touch ? '8px' : '74px';
+      palette.style.top = '8px';
+    }
+  };
+  layout();
+  addEventListener('resize', layout);
   if (touch) {
     const abs = 'position:absolute;border-radius:26px;';
+    const poseW = 58; // four pose buttons fit left of the thumb column on a 390 px phone
     eyeBtn = mk('Eyedropper', h.eyedropper, abs + 'right:12px;bottom:196px;width:100px;height:52px');
     mk('Palette', togglePalette, abs + 'right:12px;bottom:140px;width:100px;height:46px');
     mk('Zone', h.zone, abs + 'right:12px;bottom:84px;width:100px;height:46px');
     mk('Jump', h.jump, abs + 'right:12px;bottom:20px;width:100px;height:54px;background:#1a8a3acc');
-    poseBtns = POSE_LABELS.map((l, i) => mk(l, () => h.pose(i), `${abs}left:${12 + i * 70}px;bottom:28px;width:64px;height:44px;border-radius:12px`));
+    poseBtns = POSE_LABELS.map((l, i) => mk(l, () => h.pose(i), `${abs}left:${10 + i * (poseW + 4)}px;bottom:28px;width:${poseW}px;height:46px;border-radius:12px;font-size:11px`));
   } else {
     const tool = 'width:56px;height:46px;border-radius:12px;line-height:1.15;';
     eyeBtn = mk('Pick\n(E)', h.eyedropper, tool, tools);
@@ -287,6 +307,12 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
       legend.style.display = legend.style.display === 'none' ? 'flex' : 'none';
     },
     togglePalette,
+    show(v) {
+      root.style.display = v ? 'block' : 'none';
+    },
+    setPaletteTop(px) {
+      if (!narrow()) palette.style.top = `${px}px`;
+    },
     setPose(pose) {
       poseLine.textContent = pose ? `pose: ${pose}` : 'pose: none (moving breaks a pose)';
       const idx = POSE_NAMES.indexOf(pose ?? '');

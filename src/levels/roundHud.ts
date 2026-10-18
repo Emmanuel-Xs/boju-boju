@@ -1,34 +1,60 @@
-// Round HUD in the style of Meccha Chameleon: an hourglass timer at the top with one icon per hider, and a "hiders left" count bottom right.
-import type { Phase } from './round';
+// Round HUD in the style of Meccha Chameleon: an hourglass timer at the top with the round number, one icon per hider, a Ready button during prep,
+// and a "hiders left" count bottom right.
+
+export interface RoundHudState {
+  label: string;
+  seconds: number;
+  round: number;
+  /** Show the Ready button, with the points ending prep now would earn. */
+  ready: { bonus: number } | null;
+  hiders: number;
+  caught: number;
+  points: number;
+}
 
 export interface RoundHud {
-  update(phase: Phase, secondsLeft: number, hidersTotal: number, hidersCaught: number): void;
+  update(s: RoundHudState): void;
+  show(visible: boolean): void;
+  banner(text: string | null, color?: string): void;
+  onReady: (() => void) | null;
 }
 
 const css = (el: HTMLElement, text: string) => (el.style.cssText = text);
 
 export function createRoundHud(): RoundHud {
   const root = document.createElement('div');
-  css(root, 'position:fixed;inset:0;pointer-events:none;z-index:6;font-family:system-ui,sans-serif;color:#fff;text-shadow:0 2px 6px #000');
+  css(root, 'position:fixed;inset:0;pointer-events:none;z-index:6;font-family:system-ui,sans-serif;color:#fff;text-shadow:0 2px 6px #000;display:none');
   document.body.appendChild(root);
 
   const top = document.createElement('div');
-  css(top, 'position:absolute;left:50%;top:8px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;background:#000a;border-radius:12px;padding:6px 16px 8px;min-width:170px');
+  css(top, 'position:absolute;left:50%;top:8px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;background:#000a;border-radius:12px;padding:6px 16px 8px;min-width:190px');
   const time = document.createElement('div');
   css(time, 'display:flex;align-items:center;gap:8px;font:800 26px system-ui;letter-spacing:1px');
   const glass = document.createElement('span');
   css(glass, 'display:inline-block;width:20px;height:28px');
   glass.innerHTML =
-    '<svg viewBox="0 0 20 28" width="20" height="28"><path d="M2 1h16M2 27h16" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M4 1c0 8 6 9 6 13s-6 5-6 13M16 1c0 8-6 9-6 13s6 5 6 13" fill="none" stroke="#fff" stroke-width="1.6"/><path class="sand" d="M6 24h8c-1-3-3-4-4-4s-3 1-4 4z" fill="#f1c232"/></svg>';
+    '<svg viewBox="0 0 20 28" width="20" height="28"><path d="M2 1h16M2 27h16" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M4 1c0 8 6 9 6 13s-6 5-6 13M16 1c0 8-6 9-6 13s6 5 6 13" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M6 24h8c-1-3-3-4-4-4s-3 1-4 4z" fill="#f1c232"/></svg>';
   const clock = document.createElement('span');
-  time.append(glass, clock);
+  const round = document.createElement('span');
+  css(round, 'font:700 13px system-ui;opacity:.85;margin-left:6px;letter-spacing:2px');
+  time.append(glass, clock, round);
   const label = document.createElement('div');
-  css(label, 'font:700 12px system-ui;letter-spacing:2px;opacity:.9');
+  css(label, 'font:700 12px system-ui;letter-spacing:2px;opacity:.9;text-align:center');
   const icons = document.createElement('div');
   css(icons, 'display:flex;gap:6px');
-  top.append(time, label, icons);
+  const ready = document.createElement('button');
+  css(ready, 'pointer-events:auto;display:none;margin-top:4px;min-height:44px;padding:0 20px;border:0;border-radius:999px;cursor:pointer;touch-action:manipulation;font:800 15px system-ui;color:#1f2118;background:#d8fd71;text-shadow:none');
+  top.append(time, label, icons, ready);
   root.appendChild(top);
 
+  const narrow = () => innerWidth < 600;
+  const layout = () => {
+    // phones: the round bar sits top right (the profile card takes the top left) and the separate hiders counter goes away (the icons say it)
+    top.style.cssText = narrow()
+      ? 'position:absolute;right:8px;top:8px;display:flex;flex-direction:column;align-items:center;gap:3px;background:#000a;border-radius:12px;padding:5px 10px 7px;width:196px;box-sizing:border-box'
+      : 'position:absolute;left:50%;top:8px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;background:#000a;border-radius:12px;padding:6px 16px 8px;min-width:190px';
+    left.style.display = narrow() ? 'none' : 'flex';
+  };
   const left = document.createElement('div');
   css(left, 'position:absolute;right:12px;bottom:12px;display:flex;align-items:baseline;gap:8px;background:#000a;border-radius:12px;padding:6px 14px');
   const count = document.createElement('span');
@@ -37,27 +63,41 @@ export function createRoundHud(): RoundHud {
   css(countLabel, 'font:600 12px system-ui;opacity:.85');
   left.append(count, countLabel);
   root.appendChild(left);
+  layout();
+  addEventListener('resize', layout);
 
   const banner = document.createElement('div');
-  css(banner, 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:800 64px system-ui;letter-spacing:4px;text-shadow:0 4px 18px #000');
+  css(banner, 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:800 clamp(34px,8vw,64px) system-ui;letter-spacing:4px;text-shadow:0 4px 18px #000;text-align:center;padding:0 12px');
   root.appendChild(banner);
 
-  const icon = (state: 'hidden' | 'caught') =>
-    `<span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:${state === 'caught' ? '#d33' : '#48c26a'};border:2px solid #fff;text-align:center;font:800 13px/18px system-ui">${state === 'caught' ? '✕' : '●'}</span>`;
-
-  return {
-    update(phase, secondsLeft, total, caught) {
-      const s = Math.max(0, Math.ceil(secondsLeft));
-      clock.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-      label.textContent = phase === 'prep' ? 'HIDE! THE MASQUERADE IS COUNTING' : phase === 'hunt' ? 'THE HUNT IS ON' : phase === 'won' ? 'YOU SURVIVED' : 'CAUGHT';
-      const sand = glass.querySelector('.sand') as SVGElement | null;
-      if (sand) sand.style.opacity = phase === 'hunt' || phase === 'prep' ? '1' : '0.3';
-      icons.innerHTML = Array.from({ length: total }, (_, i) => icon(i < caught ? 'caught' : 'hidden')).join('');
-      count.textContent = String(Math.max(0, total - caught));
-      const over = phase === 'won' || phase === 'lost';
-      banner.style.display = over ? 'flex' : 'none';
-      banner.textContent = phase === 'won' ? 'YOU SURVIVED!' : 'CAUGHT!';
-      banner.style.background = phase === 'won' ? '#1c7a3a66' : '#8e1b1b66';
+  const handle: RoundHud = {
+    onReady: null,
+    show(v) {
+      root.style.display = v ? 'block' : 'none';
+    },
+    banner(text, color = '#8e1b1b66') {
+      banner.style.display = text ? 'flex' : 'none';
+      banner.style.background = color;
+      banner.textContent = text ?? '';
+    },
+    update(s) {
+      const sec = Math.max(0, Math.ceil(s.seconds));
+      clock.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+      round.textContent = `ROUND ${s.round}`;
+      label.textContent = s.label;
+      const icon = (caught: boolean) =>
+        `<span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:${caught ? '#d33' : '#48c26a'};border:2px solid #fff;text-align:center;font:800 13px/18px system-ui">${caught ? '✕' : '●'}</span>`;
+      icons.innerHTML = Array.from({ length: s.hiders }, (_, i) => icon(i < s.caught)).join('');
+      count.textContent = String(Math.max(0, s.hiders - s.caught));
+      if (s.ready) {
+        ready.style.display = 'block';
+        ready.textContent = `Ready!  (Enter)  +${s.ready.bonus}`;
+      } else ready.style.display = 'none';
     },
   };
+  ready.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    handle.onReady?.();
+  });
+  return handle;
 }

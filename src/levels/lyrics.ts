@@ -2,13 +2,14 @@
 // The lines are the ones the placeholder voices say (see CREDITS.md); replace both together when you record the real ones.
 import type { ClipName } from '../audio';
 
-export const CHANT_TEXT: Partial<Record<ClipName, { text: string; singer: string }>> = {
-  chant_intro: { text: 'Bojú bojú o! Ẹ̀gúngún ń bọ̀! Ẹ sá pamọ́!', singer: 'Egungun' },
-  chant_ask: { text: 'Ṣé kí n ṣí i?', singer: 'Egungun' },
-  chant_not_yet: { text: 'Má ṣí i!', singer: 'Children' },
-  chant_open: { text: 'Ṣí i!', singer: 'Children' },
-  chant_hunt: { text: 'Ẹni tí mo bá rí, màá jẹ ẹ́!', singer: 'Egungun' },
-  caught: { text: 'Mo rí ẹ!', singer: 'Egungun' },
+// `english` is a plain-language gloss shown underneath. These glosses are ours: have a Yoruba speaker check them along with the recordings.
+export const CHANT_TEXT: Partial<Record<ClipName, { text: string; english: string; singer: string }>> = {
+  chant_intro: { text: 'Bojú bojú o! Ẹ̀gúngún ń bọ̀! Ẹ sá pamọ́!', english: 'Eyes covered, eyes covered! The masquerade is coming! Go and hide!', singer: 'Egungun' },
+  chant_ask: { text: 'Ṣé kí n ṣí i?', english: 'Shall I open it?', singer: 'Egungun' },
+  chant_not_yet: { text: 'Má ṣí i!', english: "Don't open it!", singer: 'Children' },
+  chant_open: { text: 'Ṣí i!', english: 'Open it!', singer: 'Children' },
+  chant_hunt: { text: 'Ẹni tí mo bá rí, màá jẹ ẹ́!', english: "Whoever I spot, I'll gobble up!", singer: 'Egungun' },
+  caught: { text: 'Mo rí ẹ!', english: 'I see you!', singer: 'Egungun' },
 };
 
 export interface Lyrics {
@@ -24,9 +25,14 @@ export function createLyrics(): Lyrics {
   const who = document.createElement('div');
   who.style.cssText = 'font:700 12px system-ui;letter-spacing:3px;text-transform:uppercase;color:#f1c232;text-shadow:0 2px 6px #000;margin-bottom:4px';
   const line = document.createElement('div');
-  line.style.cssText = 'font:800 40px/1.2 system-ui,sans-serif;color:#fff;text-shadow:0 3px 10px #000,0 0 3px #000;letter-spacing:1px';
-  box.append(who, line);
+  line.style.cssText = 'font:800 clamp(24px,5vw,40px)/1.2 system-ui,sans-serif;color:#fff;text-shadow:0 3px 10px #000,0 0 3px #000;letter-spacing:1px';
+  const gloss = document.createElement('div');
+  gloss.style.cssText = 'font:italic 600 17px/1.3 system-ui,sans-serif;color:#fff;opacity:.92;text-shadow:0 2px 8px #000,0 0 3px #000;margin-top:4px';
+  box.append(who, line, gloss);
   document.body.appendChild(box);
+  const place = () => (box.style.bottom = innerWidth < 600 ? '262px' : '150px'); // phones: above the thumb buttons
+  place();
+  addEventListener('resize', place);
   let timers: number[] = [];
   const clear = () => {
     timers.forEach(clearTimeout);
@@ -38,6 +44,7 @@ export function createLyrics(): Lyrics {
       if (!entry) return;
       clear();
       who.textContent = entry.singer;
+      gloss.textContent = entry.english;
       const words = entry.text.split(' ');
       line.replaceChildren(
         ...words.map((w) => {
