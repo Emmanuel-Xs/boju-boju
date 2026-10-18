@@ -325,13 +325,38 @@ class AudioManager {
     return p;
   }
 
+  /** Raw bytes fetched ahead of the first gesture (a loading screen can show progress); decoding waits for unlock(). */
+  private prefetched = new Map<string, ArrayBuffer>();
+
+  /** Download clips without needing the audio context, so they are ready the moment the player taps Play. */
+  async prefetch(names: readonly ClipName[], onEach?: () => void): Promise<void> {
+    await Promise.all(
+      names.map(async (name) => {
+        try {
+          const res = await fetch(`./audio/${name}.ogg`);
+          if (res.ok) this.prefetched.set(name, await res.arrayBuffer());
+        } catch {
+          /* decoding will fall back to the placeholder */
+        }
+        onEach?.();
+      }),
+    );
+  }
+
   private async fetchOrSynth(name: ClipName): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
     try {
-      const res = await fetch(`./audio/${name}.ogg`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const pre = this.prefetched.get(name);
+      let bytes: ArrayBuffer;
+      if (pre) {
+        bytes = pre.slice(0); // decodeAudioData detaches the buffer it is given
+      } else {
+        const res = await fetch(`./audio/${name}.ogg`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        bytes = await res.arrayBuffer();
+      }
       // A dev server may answer a missing file with index.html; decode will reject it.
-      return await this.ctx.decodeAudioData(await res.arrayBuffer());
+      return await this.ctx.decodeAudioData(bytes);
     } catch (err) {
       if (!this.warned.has(name)) {
         this.warned.add(name);

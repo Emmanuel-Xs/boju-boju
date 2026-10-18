@@ -140,8 +140,11 @@ function danfoMaterial(map: THREE.Texture | null): THREE.MeshToonMaterial {
 
 // --- the level -----------------------------------------------------------------------------------------------------
 
-export async function createCompound(): Promise<Compound> {
-  const [tx, ...partLists] = await Promise.all([loadSurfaceTextures(TEXTURES), ...MODELS.map((m) => loadModelParts(m))]);
+/** Number of files createCompound fetches, so a loading bar can show real progress. */
+export const COMPOUND_ASSET_COUNT = TEXTURES.length + MODELS.length;
+
+export async function createCompound(onAsset?: () => void): Promise<Compound> {
+  const [tx, ...partLists] = await Promise.all([loadSurfaceTextures(TEXTURES, onAsset), ...MODELS.map((m) => loadModelParts(m).then((p) => (onAsset?.(), p)))]);
   const models = Object.fromEntries(MODELS.map((m, i) => [m, partLists[i]])) as Record<(typeof MODELS)[number], ModelPart[]>;
   const T = tx as Record<(typeof TEXTURES)[number], NonNullable<(typeof tx)[string]>>;
 
@@ -710,7 +713,8 @@ export function addCompoundLighting(scene: THREE.Scene, shadowMapSize: number) {
   const hemi = new THREE.HemisphereLight('#b4c8e4', '#80603f', 1.3);
   const sun = new THREE.DirectionalLight('#ffcf9a', 3.0);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+  let mapSize = shadowMapSize;
+  sun.shadow.mapSize.set(mapSize, mapSize);
   const cam = sun.shadow.camera;
   cam.left = cam.bottom = -17;
   cam.right = cam.top = 17;
@@ -723,10 +727,18 @@ export function addCompoundLighting(scene: THREE.Scene, shadowMapSize: number) {
   const toSun = new THREE.Vector3(-0.72, 0.5, 0.42).normalize();
   return {
     sun,
+    /** Lower the shadow resolution while playing (auto quality). */
+    setShadowSize(n: number) {
+      if (n === mapSize) return;
+      mapSize = n;
+      sun.shadow.mapSize.set(n, n);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    },
     /** Keep the shadow box centred on the player (snapped so shadow edges don't shimmer). */
     follow(p: THREE.Vector3) {
       // snap the shadow box to whole shadow-map texels in light space, so shadow edges don't swim as the player walks
-      const texel = 34 / shadowMapSize;
+      const texel = 34 / mapSize;
       const right = new THREE.Vector3(0, 1, 0).cross(toSun).normalize();
       const up = new THREE.Vector3().crossVectors(toSun, right);
       const sx = Math.round((p.x * right.x + p.z * right.z) / texel) * texel;

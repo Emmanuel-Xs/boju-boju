@@ -56,7 +56,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-export async function loadSurfaceTextures(names: readonly string[]): Promise<Record<string, TexInfo>> {
+export async function loadSurfaceTextures(names: readonly string[], onEach?: () => void): Promise<Record<string, TexInfo>> {
   const out: Record<string, TexInfo> = {};
   await Promise.all(
     names.map(async (name) => {
@@ -67,6 +67,7 @@ export async function loadSurfaceTextures(names: readonly string[]): Promise<Rec
       tex.anisotropy = 4;
       tex.needsUpdate = true;
       out[name] = { name, tex, avg: new PixelSampler(img, 32).average() };
+      onEach?.();
     }),
   );
   return out;

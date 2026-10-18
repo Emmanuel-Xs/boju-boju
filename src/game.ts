@@ -7,7 +7,7 @@ import { mountAudioDebug } from './audioDebug';
 import { createCharacter, type Character, type PlayerState } from './character';
 import { Fx, applyPixelRatio } from './fx';
 import type { Identity } from './identity';
-import { addCompoundLighting, createCompound } from './levels/compound';
+import { addCompoundLighting, COMPOUND_ASSET_COUNT, createCompound } from './levels/compound';
 import { Chickens } from './levels/chickens';
 import { Input, PLAYER_RADIUS, PlayerBody, RUN_SPEED, WALK_SPEED, type MoveInput } from './levels/controller';
 import { HidingController } from './levels/hiding';
@@ -17,6 +17,7 @@ import { TopDownCamera } from './levels/topdown';
 import { difficultyFor, newStats, RUN_CONFIG, verdictFor, type RunStats } from './run';
 import { Seeker } from './seeker';
 import { canTalkToStartNg, localNet, type BestRun, type Net } from './startng';
+import { AutoQuality, TIER_NAMES } from './quality';
 import { Screens, type BoardEntry } from './ui';
 
 const DEV = import.meta.env.DEV;
@@ -58,11 +59,31 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  const loading = overlay('inset:0;display:flex;align-items:center;justify-content:center;font-size:18px;z-index:30;background:#d9b88f');
-  loading.textContent = 'Loading the compound…';
+  // loading screen with a progress bar: the compound's textures and models, then the sounds
+  const loading = overlay('inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:30;background:radial-gradient(circle at 50% 40%,#e7c79c,#b98e5e)');
+  const loadTitle = document.createElement('div');
+  loadTitle.style.cssText = 'font:800 clamp(38px,9vw,64px) system-ui,sans-serif;letter-spacing:1px;text-shadow:0 4px 18px #0006';
+  loadTitle.textContent = 'Boju Boju';
+  const loadBar = document.createElement('div');
+  loadBar.style.cssText = 'width:min(300px,70vw);height:12px;border-radius:6px;background:#00000033;overflow:hidden';
+  const loadFill = document.createElement('div');
+  loadFill.style.cssText = 'height:100%;width:0;background:#d8fd71;border-radius:6px;transition:width .15s';
+  loadBar.append(loadFill);
+  const loadText = document.createElement('div');
+  loadText.style.cssText = 'font:600 14px system-ui,sans-serif;opacity:.9';
+  loadText.textContent = 'Loading the compound…';
+  loading.append(loadTitle, loadBar, loadText);
+  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught'] as const;
+  let loaded = 0;
+  const loadTotal = COMPOUND_ASSET_COUNT + LOAD_CLIPS.length;
+  const tickLoad = () => {
+    loaded++;
+    loadFill.style.width = `${Math.round((loaded / loadTotal) * 100)}%`;
+    loadText.textContent = loaded < COMPOUND_ASSET_COUNT ? 'Loading the compound…' : 'Warming up the drums…';
+  };
 
   const scene = new THREE.Scene();
-  const [level, identityFirst] = await Promise.all([createCompound(), net.identity()]);
+  const [level, identityFirst] = await Promise.all([createCompound(tickLoad), net.identity(), audio.prefetch(LOAD_CLIPS, tickLoad)]).then(([l, i]) => [l, i] as const);
   let identity: Identity = identityFirst;
   scene.add(level.group);
   const lights = addCompoundLighting(scene, coarse ? 1024 : 2048);
@@ -111,6 +132,12 @@ export async function startGame(net: Net = localNet()): Promise<void> {
 
   const input = new Input(renderer.domElement);
   const fx = new Fx(scene);
+  // auto quality: measured over the first seconds of a hunt (see quality.ts)
+  const quality = new AutoQuality((tier) => {
+    if (tier >= 1) lights.setShadowSize(512);
+    if (tier >= 2) renderer.setPixelRatio(1);
+    if (tier >= 3) fx.dust.pool.points.visible = false;
+  });
   const chickens = new Chickens(level.colliders);
   scene.add(chickens.group);
   let seeker: Seeker | null = null;
@@ -317,6 +344,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   function beginHunt() {
     if (mode !== 'prep') return;
     mode = 'hunt';
+    quality.begin();
     huntLeft = cfg.huntSeconds;
     readyWatch = -1;
     player.setHuntMode(true);
@@ -330,6 +358,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
 
   function clearRound() {
     mode = 'cleared';
+    quality.stop();
     clearedLeft = cfg.clearedSeconds;
     hopT = 0;
     runStats.rounds++;
@@ -345,6 +374,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   function startCatch() {
     if (mode !== 'hunt') return;
     mode = 'dying';
+    quality.stop();
     dyingLeft = cfg.slowMoSeconds;
     timeScale = cfg.slowMoScale;
     caughtDone = false;
@@ -362,6 +392,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     audio.cancelChant();
     audio.setSuspicion(0);
     lyrics.hide();
+    quality.stop();
     roundHud.show(false);
     roundHud.banner(null);
     hiding.show(false);
@@ -385,6 +416,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (p === paused) return;
     if (p && (mode === 'lobby' || mode === 'results')) return;
     paused = p;
+    if (p) quality.stop();
+    else if (mode === 'hunt') quality.begin();
     screens.showPause(p);
     if (p) {
       audio.setSuspicion(0);
@@ -604,6 +637,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     const rawDt = Math.max(0, (now - last) / 1000); // the first rAF timestamp can precede `last`: never run time backwards
     last = now;
     tick(rawDt);
+    if (mode === 'hunt' && !paused) quality.frame(rawDt);
     const dt = paused ? 0 : Math.min(0.05, rawDt);
 
     if (seeker?.debug) aiText.textContent = seeker.describe(sense as never);
@@ -634,7 +668,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (acc >= 0.5) {
       fps = frames / acc;
       frames = acc = 0;
-      if (showStats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} draw calls (incl. shadow pass) · ${(renderer.info.render.triangles / 1000).toFixed(0)}k tris`;
+      if (showStats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} draw calls (incl. shadow pass) · ${(renderer.info.render.triangles / 1000).toFixed(0)}k tris · quality tier ${quality.tier} (${TIER_NAMES[quality.tier]})${quality.lastFps ? ` · last window ${quality.lastFps.toFixed(0)} fps` : ''}`;
     }
   });
 
