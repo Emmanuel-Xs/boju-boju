@@ -3,6 +3,7 @@
 // nowhere stays safe: whatever it has not looked at for longest is what it walks to next.
 import { Coverage } from './levels/coverage';
 import type { SpotInfo } from './seeker';
+import { MEMORY_CONFIG, type SeekerMemory } from './memory';
 
 export const PATROL_CONFIG = {
   /** How far a look reaches from a stop (m): the catch range, because a look from further away rarely finds a camouflaged player. */
@@ -59,6 +60,7 @@ export class Patrol {
   readonly interest: Float32Array;
   private last: Stop | null = null;
   private clock = 0;
+  private firstPick = true;
   /** Stops the masquerade could not get to just now, and the time they come back. */
   private snoozed = new Map<Stop, number>();
 
@@ -67,6 +69,8 @@ export class Patrol {
     spots: readonly SpotInfo[],
     standPoint: (s: SpotInfo) => { x: number; z: number },
     readonly cfg = PATROL_CONFIG,
+    /** Where it has caught or suspected someone before: that floor counts as staler than it is. */
+    readonly memory: SeekerMemory | null = null,
   ) {
     this.age = new Float32Array(cov.cells.length).fill(cfg.startAge);
     this.interest = new Float32Array(cov.cells.length);
@@ -152,6 +156,11 @@ export class Patrol {
     for (let i = 0; i < this.age.length; i++) if (this.age[i] < cap) this.age[i] += dt;
   }
 
+  /** A new round starts: its first stop may be the hottest place in its memory. */
+  beginRound(): void {
+    this.firstPick = true;
+  }
+
   /** The masquerade got stuck on the way to this stop: leave it alone for a while. */
   snooze(stop: Stop, seconds = this.cfg.snoozeSeconds): void {
     this.snoozed.set(stop, this.clock + seconds);
@@ -186,10 +195,51 @@ export class Patrol {
   }
 
   /** The stop worth the most staleness per second of getting there, with a little randomness. */
-  next(fromX: number, fromZ: number, avoid?: ReadonlySet<Stop>): Stop {
+  next(fromX: number, fromZ: number, avoid?: ReadonlySet<Stop>, owner?: object): Stop {
     const c = this.cfg;
+    // two masquerades do not walk to the same stop: whatever the other one is heading for is left to it
+    const taken = new Set<Stop>();
+    for (const [o, st] of this.claims) if (o !== owner) taken.add(st);
+    const pick = this.choose(fromX, fromZ, avoid, taken);
+    if (owner) this.claims.set(owner, pick);
+    return pick;
+  }
+
+  private claims = new Map<object, Stop>();
+
+  private choose(fromX: number, fromZ: number, avoidIn: ReadonlySet<Stop> | undefined, taken: Set<Stop>): Stop {
+    const c = this.cfg;
+    const avoid = taken.size ? new Set([...(avoidIn ?? []), ...taken]) : avoidIn;
     let best = this.stops[0];
     let bs = -Infinity;
+    // a new round: with some probability go straight to where it has caught or suspected people before
+    if (this.firstPick) {
+      this.firstPick = false;
+      const m = this.memory;
+      if (m && Math.random() < MEMORY_CONFIG.firstChance) {
+        let hot = -1;
+        let hv = MEMORY_CONFIG.hotFirst;
+        for (let i = 0; i < m.heat.length; i++) {
+          if (m.heat[i] > hv) {
+            hv = m.heat[i];
+            hot = i;
+          }
+        }
+        if (hot >= 0) {
+          let pick: Stop | null = null;
+          let pd = Infinity;
+          for (const st of this.stops) {
+            if (avoid?.has(st) || this.isSnoozed(st) || !st.cells.includes(hot)) continue;
+            const d = Math.hypot(st.x - fromX, st.z - fromZ);
+            if (d < pd) {
+              pd = d;
+              pick = st;
+            }
+          }
+          if (pick) return pick;
+        }
+      }
+    }
     // something forgotten for too long beats any score: the nearest stop that sees the stalest cell
     let oldest = -1;
     let oldestAge = c.forceAge;
@@ -215,7 +265,7 @@ export class Patrol {
     for (const st of this.stops) {
       if ((st === this.last && this.stops.length > 1) || avoid?.has(st) || this.isSnoozed(st)) continue;
       let gain = 0;
-      for (const i of st.cells) gain += Math.min(c.ageCap, this.age[i] + this.interest[i]) ** c.agePower;
+      for (const i of st.cells) gain += Math.min(c.ageCap, this.age[i] + this.interest[i] + (this.memory ? this.memory.heat[i] * MEMORY_CONFIG.weightSeconds : 0)) ** c.agePower;
       const travel = Math.hypot(st.x - fromX, st.z - fromZ) / c.assumedSpeed + c.assumedLook;
       const score = (gain / travel) * (1 + (Math.random() * 2 - 1) * c.jitter);
       if (score > bs) {

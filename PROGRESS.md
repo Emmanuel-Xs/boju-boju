@@ -152,3 +152,27 @@ The key is now in the shell (never written to any file; `raw-assets/` is gitigno
 - `sfx_cloth_rustle_01`: striking a pose.
 - Levels: the clips were recorded very differently (the shekere peaks at +4.5 dBFS, the swish is 18 dB quieter), so each call carries its own volume; the limiter catches the rest. Tested that every sound triggers; not listened to by ear.
 - Still missing: real recorded chant lines (the YarnGPT2 stand-ins), see the ranked list in the Phase 4 entry above.
+
+## Sounds, memory, round twists, Level 2 the market (dev branch)
+**Other sources for the sounds Freesound's CC0 set did not have**
+- No CC0 raffia or ankle bells exist there, so `scripts/make-sounds.mjs` synthesizes them (ours, no licence; part of `npm run convert`): `sfx_raffia_01/02` (a swell of papery noise broken into tiny random bursts) and `sfx_bells_01/02` (a cluster of six small brass bells). They play on the masquerade's steps with the cloth swish and the shekere. Not auditioned by ear.
+- Added from Freesound (CC0, in CREDITS.md): `amb_rain` (rain loop), `sfx_power_cut`, `sfx_thunder_01`.
+- Chant lines: left as the YarnGPT2 placeholders, as you said.
+
+**Item 5, the masquerade's memory** (`src/memory.ts`)
+- A heat map over the floor, kept in localStorage (all reads and writes in try/catch): +0.6 heat where it grows suspicious, +1.5 where it catches you, spread over 1.8 m, capped at 3, multiplied by 0.93 every round. The patrol counts heat as extra staleness (150 s per unit) and 60% of the time the first stop of a round is the hottest place. Test: after one catch, the time to first check of that spot with an invisible hider fell from a mean of 30.4 s to 18.9 s over 8 runs each; the memory came back after a page reload.
+
+**Item 6, round twists** (`src/twists.ts`, all numbers in `TWIST_CONFIG`)
+- Round 3 NEPA took the light: night (hemisphere 1.3 to 0.42, sun 3.0 to 0.28, dark fog), a power-cut sound, the masquerade carries a lantern with a narrow warm beam (spot light + a lamp in its hand), and sees only in a 34 degree cone out to 9 m, plus anything within 1.8 m.
+- Round 4 rain: falling streaks around you, grey dimmer light, a rain loop and thunder every 14 to 28 s; painted clothes wash back towards your start.ng colours (63% gone after 38 s; patterns wash to their average first). Test: red paint went to `#f69300` toward `#f4a300` over 60 s.
+- Round 5 a second, smaller masquerade (0.72 scale, 18% faster, narrower cone, 0.45 m body), built the first time it is needed. It shares the first one's patrol, so they claim different stops (0 of 297 samples on the same stop), shares the memory, and either one can catch you. Round 6 on: the second stays, odd rounds are blackouts and even rounds rain.
+- Test: a 7-round cycle through all twists, no console errors; the small one catches (forced test).
+
+**Phase 5, Level 2: the market** (`src/levels/market.ts`, `src/levels/ankara.ts`, `src/levels/registry.ts`)
+- 30 m by 18 m walled plaza with the same east gate: four fabric stalls against the north wall (hide in the gap between table and cloth), an ankara mural wall, a washing line of cloths, tomato and pepper crates, yams, rice sacks, palm-oil drums, bottle-crate steps, a canteen table with an ankara cloth, a drinks fridge, a MAMA PUT sign, gas cylinders, a container shop, a generator, a keke, an okada, a bus shelter, a water tank, a bush and the zinc fence: 26 hiding spots, every one with a base colour from the surface registry.
+- Six original ankara designs drawn on canvas (fans, eyes, diamonds, waves, calabash, chain), each tiling seamlessly; a surface drawn in one has the pattern's average as its base colour.
+- Pattern paint: key `T` (or the Pattern button) cycles solid, stripes, dots. With a pattern on, a pick paints stripes or dots of the new colour over the zone's last colour (your own clothes if it was never painted), drawn in the shader from the body position; the camo score reads the average colour, with +35% credit when it is in front of a printed cloth and -12% on a plain surface (`CAMO_CONFIG.patternOnClothCredit`).
+- Level select in the lobby: two cards, the choice stored and the page reloaded (only the chosen level's code and textures are downloaded). The leaderboard is one board for both levels.
+- Checks: no dead zones and nothing seen from three cells or fewer; bot hiders at every spot and corner (camo 100): 26/26 spots and 48/48 corners after moving the water tank off the fence (the north-east nook behind it was the one that stayed unseen; first check 87 s); catch rate within 2 hunts: camo 20 = 52/52, camo 40 = 44/52. Compound regression: 62/62 corners, 28/28 spots, camo 55 = 22/56 as before.
+- Phone: lobby with level cards fits at 390 px; no overlaps, all controls 44 px or more.
+- Not verified: how the market feels to play (the stall layout and balance are first guesses), real device fps with the extra draw calls (six cloth batches), the look of the mural and patterns on a real screen beyond my screenshots.

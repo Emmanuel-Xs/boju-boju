@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "convert": "node scripts/stage-models.mjs && node scripts/convert-models.mjs && node scripts/convert-textures.mjs && node scripts/convert-audio.mjs && node scripts/make-contact-sheet.mjs",
+    "convert": "node scripts/stage-models.mjs && node scripts/convert-models.mjs && node scripts/convert-textures.mjs && node scripts/make-sounds.mjs && node scripts/convert-audio.mjs && node scripts/make-contact-sheet.mjs",
     "build": "tsc --noEmit && vite build && node scripts/strip-debug.mjs",
     "check": "node scripts/check-assets.mjs",
     "release": "npm run convert && npm run build && npm run check"

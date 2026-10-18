@@ -6,13 +6,13 @@ export const CHANNELS: Channel[] = ['chant', 'music', 'ambience', 'sfx'];
 
 export const CHANT_CLIPS = ['chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught'] as const;
 export const MUSIC_CLIPS = ['drum_loop'] as const;
-export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
+export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator', 'amb_rain'] as const;
 export const HORN_CLIPS = ['sfx_horn_motorbike_01', 'sfx_horn_motorbike_02'] as const;
 export const STEP_NAMES = (['concrete', 'sand'] as const).flatMap((s) => [1, 2, 3, 4, 5].map((i) => `sfx_step_${s}_0${i}` as const));
 export const UI_CLIPS = ['sfx_ui_click_01', 'sfx_ui_click_02', 'sfx_ui_confirm_01', 'sfx_ui_back_01'] as const;
-/** Real recordings (Freesound, CC0): a hen's alarm call and a cluck, the masquerade's shekere rattle and cloth swish, a pose rustle, a gasp when it spots something. */
+/** Real recordings (Freesound, CC0; the raffia and ankle bells are our own, made by scripts/make-sounds.mjs): a hen's alarm call and a cluck, the masquerade's shekere rattle and cloth swish, a pose rustle, a gasp when it spots something. */
 export const HEN_CLIPS = ['sfx_hen_squawk_01', 'sfx_hen_squawk_02'] as const;
-export const WORLD_CLIPS = ['sfx_hen_cluck_01', 'sfx_egungun_rattle_01', 'sfx_egungun_rattle_02', 'sfx_cloth_swish_01', 'sfx_cloth_rustle_01', 'sfx_spotted_01'] as const;
+export const WORLD_CLIPS = ['sfx_hen_cluck_01', 'sfx_egungun_rattle_01', 'sfx_egungun_rattle_02', 'sfx_cloth_swish_01', 'sfx_cloth_rustle_01', 'sfx_spotted_01', 'sfx_raffia_01', 'sfx_raffia_02', 'sfx_bells_01', 'sfx_bells_02', 'sfx_power_cut', 'sfx_thunder_01'] as const;
 export const DRUM_CLIPS = ['drum_hit_01', 'drum_hit_02', 'drum_hit_03'] as const;
 export const LAND_CLIPS = ['sfx_hit_soft_01', 'sfx_hit_soft_02'] as const;
 export const SFX_CLIPS = [...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS] as const;
@@ -32,6 +32,7 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   drum_loop: 'music',
   amb_market: 'ambience',
   amb_generator: 'ambience',
+  amb_rain: 'ambience',
   sfx_horn_motorbike_01: 'sfx',
   sfx_horn_motorbike_02: 'sfx',
   sfx_rooster_01: 'sfx',

@@ -71,6 +71,13 @@ export class Screens {
   }
 
   // --- lobby
+  private levelSelect: { levels: readonly { id: string; name: string; blurb: string }[]; current: string; pick: (id: string) => void } | null = null;
+
+  /** The levels shown in the lobby; picking another one calls `pick` (the game stores the choice and reloads). */
+  setLevels(levels: readonly { id: string; name: string; blurb: string }[], current: string, pick: (id: string) => void): void {
+    this.levelSelect = { levels, current, pick };
+  }
+
   showLobby(id: Identity, best: { score: number; rounds: number; camo: number } | null, board: BoardEntry[] | null, canSignIn: boolean): void {
     this.hideAll();
     this.lobby.replaceChildren();
@@ -91,6 +98,21 @@ export class Screens {
     who.append(face, names);
     left.append(who);
     left.append(el('div', 'padding:8px 14px;background:#150c0acc;border-radius:12px;font:600 14px system-ui', best ? `Your best run: ${best.score} points · ${best.rounds} round${best.rounds === 1 ? '' : 's'} · ${best.camo}% camo` : id.signedIn ? 'No run saved yet. Go on, hide!' : 'Sign in to save your best run.'));
+    if (this.levelSelect && this.levelSelect.levels.length > 1) {
+      const { levels, current, pick } = this.levelSelect;
+      const row = el('div', 'display:flex;gap:8px');
+      for (const l of levels) {
+        const on = l.id === current;
+        const b = el('button', `flex:1;min-height:56px;padding:8px 10px;border-radius:14px;cursor:pointer;touch-action:manipulation;text-align:left;border:2px solid ${on ? ACCENT : '#fff3'};background:${on ? '#2a3a0acc' : '#150c0acc'};color:#fff;font:600 12px/1.3 system-ui`);
+        b.append(el('div', `font:800 15px system-ui;color:${on ? ACCENT : '#fff'}`, l.name), el('div', 'opacity:.8;margin-top:2px', l.blurb));
+        b.setAttribute('aria-pressed', String(on));
+        b.onclick = () => {
+          if (!on) pick(l.id);
+        };
+        row.append(b);
+      }
+      left.append(row);
+    }
     const play = el('button', BUTTON + ';font-size:20px;min-height:56px', 'Play');
     play.onclick = () => this.h.play();
     left.append(play);

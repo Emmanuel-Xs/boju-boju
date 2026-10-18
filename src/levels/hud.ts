@@ -14,6 +14,8 @@ export interface Hud {
   crosshair(show: boolean, x?: number, y?: number, valid?: boolean, swatch?: { color: THREE.Color; label: string } | null, dim?: boolean): void;
   setAiming(on: boolean): void;
   setPose(pose: string | null): void;
+  /** Which paint pattern is on (the Pattern button shows it). */
+  setPattern(kind: 'solid' | 'stripes' | 'dots'): void;
   /** Colours picked so far, newest first; clicking one paints the selected zone with it. */
   setRecent(items: { color: THREE.Color; label: string }[]): void;
   toggleLegend(): void;
@@ -27,6 +29,7 @@ export interface Hud {
 export interface HudHandlers {
   eyedropper(): void;
   zone(): void;
+  pattern(): void;
   selectZone(zone: PaintZone): void;
   recent(index: number): void;
   pose(index: number): void;
@@ -117,6 +120,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     group('Jump / climb', kbd('Space')),
     group('Eyedropper', kbd('E') + ' then click'),
     group('Zone', kbd('Q')),
+    group('Pattern', kbd('T')),
     group('Poses', kbd('1') + kbd('2') + kbd('3') + kbd('4')),
     group('Hunt mode', kbd('H')),
     group('Camo text', kbd('C')),
@@ -193,6 +197,7 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
 
   // buttons: a vertical tool bar down the left edge on desktop (like the game's tool icons), thumb buttons on touch
   let eyeBtn: HTMLButtonElement | null = null;
+  let patternBtn: HTMLButtonElement | null = null;
   let poseBtns: HTMLButtonElement[] = [];
   const tools = document.createElement('div');
   css(tools, 'position:absolute;left:8px;top:50%;transform:translateY(-50%);display:' + (touch ? 'none' : 'flex') + ';flex-direction:column;gap:6px');
@@ -231,12 +236,14 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     eyeBtn = mk('Eyedropper', h.eyedropper, abs + 'right:12px;bottom:196px;width:100px;height:52px');
     mk('Palette', togglePalette, abs + 'right:12px;bottom:140px;width:100px;height:46px');
     mk('Zone', h.zone, abs + 'right:12px;bottom:84px;width:100px;height:46px');
+    patternBtn = mk('Pattern: solid', h.pattern, abs + 'right:120px;bottom:84px;width:96px;height:46px;font-size:12px');
     mk('Jump', h.jump, abs + 'right:12px;bottom:20px;width:100px;height:54px;background:#1a8a3acc');
     poseBtns = POSE_LABELS.map((l, i) => mk(l, () => h.pose(i), `${abs}left:${10 + i * (poseW + 4)}px;bottom:28px;width:${poseW}px;height:46px;border-radius:12px;font-size:11px`));
   } else {
     const tool = 'width:56px;height:46px;border-radius:12px;line-height:1.15;';
     eyeBtn = mk('Pick\n(E)', h.eyedropper, tool, tools);
     mk('Zone\n(Q)', h.zone, tool, tools);
+    patternBtn = mk('Solid\n(T)', h.pattern, tool, tools);
     mk('Palette\n(P)', togglePalette, tool, tools);
     poseBtns = ['Stiff\n(1)', 'Crouch\n(2)', 'Wall\n(3)', 'Ball\n(4)'].map((l, i) => mk(l, () => h.pose(i), tool, tools));
     for (const b of [eyeBtn, ...poseBtns]) b.style.whiteSpace = 'pre';
@@ -312,6 +319,12 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
     },
     setPaletteTop(px) {
       if (!narrow()) palette.style.top = `${px}px`;
+    },
+    setPattern(kind) {
+      if (!patternBtn) return;
+      const name = kind === 'solid' ? 'Solid' : kind === 'stripes' ? 'Stripes' : 'Dots';
+      patternBtn.textContent = touch ? `Pattern: ${name.toLowerCase()}` : `${name}\n(T)`;
+      patternBtn.style.background = kind === 'solid' ? '#000a' : '#7a5ad0cc';
     },
     setPose(pose) {
       poseLine.textContent = pose ? `pose: ${pose}` : 'pose: none (moving breaks a pose)';

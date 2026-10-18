@@ -3,7 +3,7 @@
 // Colours are compared in Lab space between the zone colour and the *base colour* of the surface behind the player
 // (userData.baseColor, never a lit pixel). The meter knows nothing about the level: it asks a CamoProbe.
 import * as THREE from 'three';
-import type { PaintZone, PlayerState } from './character';
+import type { PaintZone, PatternKind, PlayerState } from './character';
 
 /** Every tuning knob for the score lives here. Points are on the final 0..100 scale. */
 export const CAMO_CONFIG = {
@@ -18,6 +18,12 @@ export const CAMO_CONFIG = {
   labWorst: 60,
   /** Exponent on the 0..1 credit: above 1 punishes near misses harder. */
   colorCurve: 1.4,
+  /**
+   * Stripes or dots: on a printed cloth (surface kind "cloth") a busy pattern is good camouflage and adds this much credit (0..1);
+   * on a plain surface it stands out and takes this much off. The colour term itself reads the pattern's average colour.
+   */
+  patternOnClothCredit: 0.35,
+  patternOnPlainCredit: -0.12,
   /** Credit (0..1) for a zone that has never been painted. Unpainted zones can't be camouflaged by luck. */
   unpaintedCredit: 0,
   /** Heights (m above the feet) of the rays through the top and bottom zones, per pose. */
@@ -102,7 +108,7 @@ export interface NearSurface {
 
 export interface CamoProbe {
   /** The surface behind `through` as seen from `eye`: its base colour, or null if the ray leaves the world. */
-  behind(eye: THREE.Vector3, through: THREE.Vector3): { color: THREE.Color; id: string; label: string } | null;
+  behind(eye: THREE.Vector3, through: THREE.Vector3): { color: THREE.Color; id: string; label: string; kind?: string } | null;
   near(point: THREE.Vector3, radius: number): NearSurface[];
   wall(point: THREE.Vector3, maxDistance: number): { distance: number; normal: { x: number; z: number } } | null;
 }
@@ -110,6 +116,8 @@ export interface CamoProbe {
 export interface CamoState {
   zones: Record<PaintZone, THREE.Color>;
   painted: Record<PaintZone, boolean>;
+  /** Stripes, dots or solid, per zone (missing = solid). */
+  patterns?: Record<PaintZone, PatternKind>;
   /** The held pose, or null when just standing or walking. */
   pose: PlayerState | null;
   /** 0 when still; otherwise the walking or running speed (m/s). */
@@ -214,6 +222,7 @@ export class CamoMeter {
       else if (hit) {
         deltaE = labDistance(s.zones[zone], hit.color);
         credit = clamp01(1 - (deltaE - cfg.labPerfect) / (cfg.labWorst - cfg.labPerfect)) ** cfg.colorCurve;
+        if (s.patterns && s.patterns[zone] !== 'solid') credit = clamp01(credit + (hit.kind === 'cloth' ? cfg.patternOnClothCredit : cfg.patternOnPlainCredit));
       }
       out.push({
         zone,

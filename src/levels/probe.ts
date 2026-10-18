@@ -37,9 +37,9 @@ export class LevelProbe implements CamoProbe {
   }
 
   /** The base colour for a ray hit: the nearest registered surface, else the mesh's own base colour. */
-  private read(hit: THREE.Intersection): Reading | null {
+  private read(hit: THREE.Intersection): (Reading & { kind?: string }) | null {
     const s = this.level.surfaces.nearest(hit.point, 0.35);
-    if (s) return { color: s.baseColor.clone(), id: s.id, label: s.label, point: hit.point.clone(), distance: hit.distance };
+    if (s) return { color: s.baseColor.clone(), id: s.id, label: s.label, kind: s.kind, point: hit.point.clone(), distance: hit.distance };
     const c = hit.object.userData.baseColor as THREE.Color | undefined;
     if (c) return { color: c.clone(), id: hit.object.name || 'mesh', label: hit.object.name || 'surface', point: hit.point.clone(), distance: hit.distance };
     return null;
@@ -57,7 +57,7 @@ export class LevelProbe implements CamoProbe {
     return null;
   }
 
-  behind(eye: THREE.Vector3, through: THREE.Vector3): { color: THREE.Color; id: string; label: string } | null {
+  behind(eye: THREE.Vector3, through: THREE.Vector3): { color: THREE.Color; id: string; label: string; kind?: string } | null {
     const dir = this.v.copy(through).sub(eye);
     const dPlayer = dir.length();
     this.ray.set(eye, dir.normalize());

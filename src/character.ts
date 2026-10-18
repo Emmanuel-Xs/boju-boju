@@ -204,6 +204,60 @@ const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 
   return m;
 };
 
+export type PatternKind = 'solid' | 'stripes' | 'dots';
+
+/** What a painted zone looks like: one colour, or stripes or dots of colour `a` on colour `b`. */
+export interface ZonePattern {
+  kind: PatternKind;
+  a: THREE.Color;
+  b: THREE.Color;
+}
+
+const PATTERN_FREQ = { stripes: 7, dots: 8 };
+/** Share of a dotted surface the dots cover (the dot radius is 0.28 of a cell). */
+export const DOT_COVER = Math.PI * 0.28 * 0.28;
+
+/** Makes a clothing material able to draw stripes or dots from two colours, using the position on the body (the models have no UVs). */
+function patternable(mat: THREE.MeshToonMaterial) {
+  const u = { kind: { value: 0 }, a: { value: new THREE.Color('#ffffff') }, b: { value: new THREE.Color('#000000') } };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uKind = u.kind;
+    shader.uniforms.uA = u.a;
+    shader.uniforms.uB = u.b;
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObjPos;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vObjPos;\nuniform float uKind;\nuniform vec3 uA;\nuniform vec3 uB;').replace(
+      '#include <color_fragment>',
+      /* glsl */ `#include <color_fragment>
+      if (uKind > 0.5) {
+        float s;
+        if (uKind < 1.5) s = step(0.5, fract((vObjPos.y + vObjPos.x * 0.35) * ${PATTERN_FREQ.stripes.toFixed(1)}));
+        else {
+          vec2 f = fract(vec2(vObjPos.x + vObjPos.z * 0.6, vObjPos.y) * ${PATTERN_FREQ.dots.toFixed(1)}) - 0.5;
+          s = step(length(f), 0.28);
+        }
+        diffuseColor.rgb = mix(uB, uA, s);
+      }`,
+    );
+  };
+  mat.customProgramCacheKey = () => 'zone-pattern-v1';
+  const state: ZonePattern = { kind: 'solid', a: new THREE.Color(), b: new THREE.Color() };
+  return {
+    state,
+    set(kind: PatternKind, a: THREE.ColorRepresentation, b: THREE.ColorRepresentation) {
+      state.kind = kind;
+      state.a.set(a);
+      state.b.set(b);
+      u.kind.value = kind === 'solid' ? 0 : kind === 'stripes' ? 1 : 2;
+      u.a.value.copy(state.a);
+      u.b.value.copy(state.b);
+      // the colour the camo score reads: the pattern's average
+      if (kind === 'stripes') mat.color.copy(state.a).lerp(state.b, 0.5);
+      else if (kind === 'dots') mat.color.copy(state.b).lerp(state.a, DOT_COVER);
+      else mat.color.copy(state.a);
+    },
+  };
+}
+
 export interface Character {
   readonly group: THREE.Group;
   readonly style: StartNgStyle;
@@ -211,6 +265,9 @@ export interface Character {
   /** Recolour clothing at runtime (painting). Changes the shared material, so every part of the zone follows. */
   setZoneColor(zone: PaintZone, c: THREE.ColorRepresentation): void;
   getZoneColor(zone: PaintZone): THREE.Color;
+  /** Paint a zone with stripes or dots of colour `a` on colour `b` (or 'solid': just `a`). getZoneColor then reads the average. */
+  setZonePattern(zone: PaintZone, kind: PatternKind, a: THREE.ColorRepresentation, b: THREE.ColorRepresentation): void;
+  getZonePattern(zone: PaintZone): ZonePattern;
   /** Hunt phase: hides hat, accessory and hair so the player is just a plain painted body. */
   setHuntMode(on: boolean): void;
   readonly huntMode: boolean;
@@ -225,6 +282,7 @@ export function createCharacter(input?: Record<string, unknown> | null): Charact
 
   const topMat = toon(style.primaryColor);
   const bottomMat = toon(style.secondaryColor, female ? { side: THREE.DoubleSide } : {});
+  const pat = { top: patternable(topMat), bottom: patternable(bottomMat) };
   const skinMat = toon(style.skinColor);
   const hairMat = toon(style.hairColor);
   const shoeMat = toon('#2a2320');
@@ -518,7 +576,14 @@ export function createCharacter(input?: Record<string, unknown> | null): Charact
       return huntMode;
     },
     setZoneColor(zone, c) {
-      (zone === 'top' ? topMat : bottomMat).color.set(c);
+      pat[zone].set('solid', c, c); // a plain colour: any pattern is gone
+    },
+    setZonePattern(zone, kind, a, b) {
+      pat[zone].set(kind, a, b);
+    },
+    getZonePattern(zone) {
+      const s = pat[zone].state;
+      return { kind: s.kind, a: s.a.clone(), b: s.b.clone() };
     },
     getZoneColor(zone) {
       return (zone === 'top' ? topMat : bottomMat).color.clone();

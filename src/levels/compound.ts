@@ -4,6 +4,7 @@
 // a base colour (texture average x tint) in userData.baseColor; the eyedropper and the seeker read that, never the lit pixel colour.
 import * as THREE from 'three';
 import { toon } from '../toon';
+import { COMPOUND_DIRT, type Ground } from './ground';
 import { box, circle, type Collider, resolveCollisions, PLAYER_RADIUS } from './controller';
 import {
   FadeGroup,
@@ -47,6 +48,16 @@ export interface HidingSpot {
 }
 
 export interface Compound {
+  id: string;
+  name: string;
+  /** Files fetched while building (for the loading bar). */
+  assetCount: number;
+  /** Where the masquerade stands at the start of every round, and the turntable the lobby shows the player on. */
+  seekerStart: { x: number; z: number; yaw: number };
+  lobbyPos: { x: number; z: number };
+  /** Where the chickens may roam. */
+  chickenArea: { minX: number; maxX: number; minZ: number; maxZ: number };
+  ground: Ground;
   group: THREE.Group;
   colliders: Collider[];
   surfaces: SurfaceRegistry;
@@ -703,6 +714,13 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
     hidingSpots,
     fadeGroups,
     bounds: { minX: -HALF + 0.3, maxX: 14.75, minZ: -9.6, maxZ: 9.6 }, // the yard only: the gate is the way home, not a way out
+    id: 'compound',
+    name: 'The Compound',
+    assetCount: COMPOUND_ASSET_COUNT,
+    seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
+    lobbyPos: { x: 0.5, z: 0.5 },
+    chickenArea: { minX: -14.2, maxX: 14.2, minZ: -8.7, maxZ: 8.7 },
+    ground: { halfX: 15, halfZ: 9, patches: COMPOUND_DIRT },
     spawn: new THREE.Vector3(0.5, 0, 0.5),
     generator: generatorPos,
     gate: { x: 14.6, z: 0, halfWidth: 2.6 },
@@ -731,8 +749,27 @@ export function addCompoundLighting(scene: THREE.Scene, shadowMapSize: number) {
   sun.shadow.normalBias = 0.05;
   scene.add(sun, sun.target, hemi);
   const toSun = new THREE.Vector3(-0.72, 0.5, 0.42).normalize();
+  // the mood: late afternoon by default; a blackout (NEPA took the light) or rain pull everything towards night or a grey sky
+  const day = { bg: new THREE.Color('#d9b88f'), fog: new THREE.Color('#d9b48b'), near: 42, far: 105, hemi: 1.3, sun: 3.0, hemiSky: new THREE.Color('#b4c8e4'), hemiGround: new THREE.Color('#80603f') };
+  const night = { bg: new THREE.Color('#0b1124'), near: 7, far: 48, hemi: 0.42, sun: 0.28, hemiSky: new THREE.Color('#5b72b8'), hemiGround: new THREE.Color('#2b2a3a') };
+  const grey = { bg: new THREE.Color('#a9b0b8'), near: 22, far: 70, hemi: 1.05, sun: 1.5 };
   return {
     sun,
+    /** dark 0..1 (a blackout) and rain 0..1 (a grey, dimmer afternoon). */
+    setMood(dark: number, rain: number) {
+      const d = Math.min(1, Math.max(0, dark));
+      const r = Math.min(1, Math.max(0, rain)) * (1 - d);
+      const bg = day.bg.clone().lerp(grey.bg, r).lerp(night.bg, d);
+      (scene.background as THREE.Color).copy(bg);
+      const fog = scene.fog as THREE.Fog;
+      fog.color.copy(bg);
+      fog.near = day.near + (grey.near - day.near) * r + (night.near - day.near) * d;
+      fog.far = day.far + (grey.far - day.far) * r + (night.far - day.far) * d;
+      hemi.intensity = day.hemi + (grey.hemi - day.hemi) * r + (night.hemi - day.hemi) * d;
+      sun.intensity = day.sun + (grey.sun - day.sun) * r + (night.sun - day.sun) * d;
+      hemi.color.copy(day.hemiSky).lerp(night.hemiSky, d);
+      hemi.groundColor.copy(day.hemiGround).lerp(night.hemiGround, d);
+    },
     /** Lower the shadow resolution while playing (auto quality). */
     setShadowSize(n: number) {
       if (n === mapSize) return;

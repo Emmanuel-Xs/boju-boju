@@ -1,0 +1,1 @@
+export{i as createCompound}from"./game-DM1b5fYo.js";

@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { audio } from '../audio';
 import { CamoMeter, describeBreakdown } from '../camo';
-import type { Character, PaintZone, PlayerState } from '../character';
+import type { Character, PaintZone, PatternKind, PlayerState } from '../character';
 import type { Fx } from '../fx';
 import type { Compound } from './compound';
 import { nearestWall, resolveCollisions, type Input } from './controller';
@@ -47,6 +47,9 @@ export class HidingController {
   readonly camo: CamoMeter;
   zone: PaintZone = 'top';
   readonly painted: Record<PaintZone, boolean> = { top: false, bottom: false };
+  /** Pattern mode: the next pick paints stripes or dots of the new colour over the zone's last colour. */
+  patternKind: PatternKind = 'solid';
+  private lastPick: Partial<Record<PaintZone, THREE.Color>> = {};
   pose: PlayerState | null = null;
   private aimOn = false;
   private eDownAt = 0;
@@ -72,6 +75,7 @@ export class HidingController {
     this.hud = createHud(o.touch, {
       eyedropper: () => this.toggleAim(),
       zone: () => this.toggleZone(),
+      pattern: () => this.cyclePattern(),
       selectZone: (z) => {
         this.zone = z;
       },
@@ -143,12 +147,42 @@ export class HidingController {
     this.o.player.setZoneColor('top', top);
     this.o.player.setZoneColor('bottom', bottom);
     this.painted.top = this.painted.bottom = false;
+    this.patternKind = 'solid';
+    this.hud.setPattern('solid');
+    this.lastPick = {};
     this.recent = [];
     this.hud.setRecent([]);
     this.zone = 'top';
     this.aimOn = false;
     this.clearPose();
     this.camo.invalidate();
+  }
+
+  /** Rain: painted clothes drift back towards the start.ng colours. `k` is the share of the way to move this call; the camo score is refreshed every `refresh` seconds. */
+  fadePaint(top: THREE.ColorRepresentation, bottom: THREE.ColorRepresentation, k: number, refresh: number): void {
+    const target = { top: new THREE.Color(top), bottom: new THREE.Color(bottom) };
+    let changed = false;
+    for (const zone of ['top', 'bottom'] as const) {
+      if (!this.painted[zone]) continue;
+      if (this.o.player.getZonePattern(zone).kind !== 'solid') this.o.player.setZoneColor(zone, this.o.player.getZoneColor(zone)); // rain washes the pattern to its average first
+      const c = this.o.player.getZoneColor(zone).clone().lerp(target[zone], k);
+      this.o.player.setZoneColor(zone, c);
+      if ((c.r - target[zone].r) ** 2 + (c.g - target[zone].g) ** 2 + (c.b - target[zone].b) ** 2 < 0.0008) this.painted[zone] = false; // washed right out
+      changed = true;
+    }
+    if (changed && performance.now() >= this.fadeNext) {
+      this.fadeNext = performance.now() + refresh * 1000;
+      this.camo.invalidate();
+    }
+  }
+
+  private fadeNext = 0;
+
+  /** T: solid, then stripes, then dots. */
+  cyclePattern(): void {
+    this.patternKind = this.patternKind === 'solid' ? 'stripes' : this.patternKind === 'stripes' ? 'dots' : 'solid';
+    this.hud.setPattern(this.patternKind);
+    this.hud.toast(this.patternKind === 'solid' ? 'Pattern off: picks paint one solid colour' : `Pattern: ${this.patternKind}. Pick a colour and it goes over the zone's last colour in ${this.patternKind}.`);
   }
 
   /** Drop any held pose (e.g. after being caught). */
@@ -183,6 +217,7 @@ export class HidingController {
     }
     if (!down || e.repeat) return;
     if (e.code === 'KeyQ') this.toggleZone();
+    else if (e.code === 'KeyT') this.cyclePattern();
     else if (e.code === 'KeyH') {
       this.o.player.setHuntMode(!this.o.player.huntMode);
       this.camo.invalidate();
@@ -260,7 +295,13 @@ export class HidingController {
   private paint(r: { color: THREE.Color; label: string }): void {
     this.cooldownUntil = performance.now() + PAINT_COOLDOWN * 1000;
     const { player, fx, pos } = this.o;
-    player.setZoneColor(this.zone, r.color);
+    if (this.patternKind === 'solid') player.setZoneColor(this.zone, r.color);
+    else {
+      // two picked colours: the new one in stripes or dots over the one the zone had (your own clothes if it was not painted yet)
+      const under = this.lastPick[this.zone] ?? player.getZoneColor(this.zone);
+      player.setZonePattern(this.zone, this.patternKind, r.color, under);
+    }
+    this.lastPick[this.zone] = r.color.clone();
     this.painted[this.zone] = true;
     const hexKey = r.color.getHexString();
     this.recent = [{ color: r.color.clone(), label: r.label }, ...this.recent.filter((c) => c.color.getHexString() !== hexKey)].slice(0, 8);
@@ -323,6 +364,7 @@ export class HidingController {
     const b = this.camo.update(dt, {
       zones: { top: player.getZoneColor('top'), bottom: player.getZoneColor('bottom') },
       painted: this.painted,
+      patterns: { top: player.getZonePattern('top').kind, bottom: player.getZonePattern('bottom').kind },
       pose: this.pose,
       speed: f.speed,
       running: f.speed > 3.5,

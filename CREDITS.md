@@ -62,8 +62,13 @@ Licence for each: Creative Commons 0 (https://creativecommons.org/publicdomain/z
 | sfx_cloth_swish_01.ogg | Fabric Flap.wav | akennedybrewer | https://freesound.org/people/akennedybrewer/sounds/389170/ |
 | sfx_cloth_rustle_01.ogg | Jacket/Cloth Rustle 3 | brandondelehoy | https://freesound.org/people/brandondelehoy/sounds/494789/ |
 | sfx_spotted_01.ogg | Exaggerated Surprised Gasp! | CuboRodante | https://freesound.org/people/CuboRodante/sounds/812418/ |
+| amb_rain.ogg | rain_loop.wav | Krokulator | https://freesound.org/people/Krokulator/sounds/679176/ |
+| sfx_power_cut.ogg | power cut | ninjatrappeur | https://freesound.org/people/ninjatrappeur/sounds/400194/ |
+| sfx_thunder_01.ogg | Thunder 6 | LukaCafuka | https://freesound.org/people/LukaCafuka/sounds/750667/ |
 
 ## Generated sounds
+
+`sfx_raffia_01/02` (the masquerade's raffia fringe) and `sfx_bells_01/02` (its ankle bells) are synthesized by `scripts/make-sounds.mjs`: ours, no licence. No CC0 library had either.
 
 `sfx_paint.ogg` (the paint splat) is synthesized with ffmpeg's `lavfi` sources (brown and white noise plus a falling sine chirp); no third-party material.
 

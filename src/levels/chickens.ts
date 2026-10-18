@@ -44,7 +44,7 @@ export interface Squawk {
 export interface Snitch {
   active: boolean;
   player: { x: number; z: number };
-  seeker: { x: number; z: number } | null;
+  seekers: { x: number; z: number }[];
 }
 interface Hen {
   x: number;
@@ -211,7 +211,7 @@ export class Chickens {
         }
       }
       // a chicken next to the hider, with the masquerade close by, gives them away
-      if (snitch?.active && snitch.seeker && h.snitchCd <= 0 && h.state !== 'panic' && Math.hypot(h.x - snitch.player.x, h.z - snitch.player.z) <= c.snitchPlayerRange && Math.hypot(h.x - snitch.seeker.x, h.z - snitch.seeker.z) <= c.snitchSeekerRange) {
+      if (snitch?.active && snitch.seekers.length > 0 && h.snitchCd <= 0 && h.state !== 'panic' && Math.hypot(h.x - snitch.player.x, h.z - snitch.player.z) <= c.snitchPlayerRange && snitch.seekers.some((sk) => Math.hypot(h.x - sk.x, h.z - sk.z) <= c.snitchSeekerRange)) {
         h.state = 'panic';
         h.timer = c.panicTime;
         h.snitchCd = c.snitchCooldown + c.panicTime;

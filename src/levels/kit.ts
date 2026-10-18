@@ -157,7 +157,15 @@ export class StaticBatch {
   ) {}
 
   /** Tint that makes `target` the average on-screen colour, and the base colour that results from it. */
+  /** Draw the texture as it is (a printed cloth): no tint, and the base colour is the texture's own average. */
+  private rawTint = false;
+  raw(): this {
+    this.rawTint = true;
+    return this;
+  }
+
   private tintFor(target: THREE.ColorRepresentation): { tint: THREE.Color; base: THREE.Color } {
+    if (this.rawTint && this.tex) return { tint: new THREE.Color(1, 1, 1), base: this.tex.avg.clone() };
     const t = new THREE.Color(target);
     if (!this.tex) return { tint: t, base: t.clone() };
     const a = this.tex.avg;

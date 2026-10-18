@@ -11,8 +11,8 @@ export const FOOTSTEP_CONFIG = {
   minSpeed: 0.5,
   player: { volume: 0.3, runVolume: 0.42, rateJitter: 0.08 },
   seeker: { volume: 0.75, rate: 0.78, rateJitter: 0.05, refDistance: 3, maxDistance: 26, rolloff: 1.4 },
-  /** What the masquerade's costume adds to each step: cloth swish every step, a shekere rattle on some (volumes are per clip, they were recorded at very different levels). */
-  costume: { swish: 1.6, rattleChance: 0.55, rattle: [0.22, 0.5] as [number, number] },
+  /** What the masquerade's costume adds to each step: cloth swish and raffia every step, ankle bells on most, a shekere rattle on some (volumes are per clip, they were recorded at very different levels). */
+  costume: { swish: 1.2, raffia: 0.5, bells: 0.28, bellsChance: 0.8, rattleChance: 0.3, rattle: [0.2, 0.45] as [number, number] },
   /** How many recorded variations each surface has. */
   variations: 5,
 };
@@ -28,6 +28,8 @@ export class Stepper {
     private who: 'player' | 'seeker',
     /** Called on every step the player takes (where, and whether running). */
     private onStep?: (x: number, z: number, run: boolean) => void,
+    /** Pitch multiplier (a smaller figure steps higher). */
+    private pitch = 1,
   ) {}
 
   /** Advance by `dt` seconds at `speed` m/s. */
@@ -52,13 +54,15 @@ export class Stepper {
       const s = c.seeker;
       const at = { position: { x, y: 1, z }, refDistance: s.refDistance, maxDistance: s.maxDistance, rolloff: s.rolloff };
       void audio.playOnce('sfx_cloth_swish_01', { volume: c.costume.swish, rate: 0.9 + Math.random() * 0.2, spatial: at });
+      void audio.playOnce(Math.random() < 0.5 ? 'sfx_raffia_01' : 'sfx_raffia_02', { volume: c.costume.raffia, rate: 0.9 + Math.random() * 0.2, spatial: at });
+      if (Math.random() < c.costume.bellsChance) void audio.playOnce(Math.random() < 0.5 ? 'sfx_bells_01' : 'sfx_bells_02', { volume: c.costume.bells, rate: 0.9 + Math.random() * 0.25, spatial: at });
       if (Math.random() < c.costume.rattleChance) {
         const which = Math.random() < 0.5 ? 0 : 1;
         void audio.playOnce(which === 0 ? 'sfx_egungun_rattle_01' : 'sfx_egungun_rattle_02', { volume: c.costume.rattle[which], rate: 0.95 + Math.random() * 0.1, spatial: at });
       }
       void audio.playOnce(clip, {
         volume: s.volume,
-        rate: s.rate + (Math.random() * 2 - 1) * s.rateJitter,
+        rate: (s.rate + (Math.random() * 2 - 1) * s.rateJitter) * this.pitch,
         spatial: { position: { x, y: 0.1, z }, refDistance: s.refDistance, maxDistance: s.maxDistance, rolloff: s.rolloff },
       });
     }

@@ -12,15 +12,19 @@ import { mountAudioDebug } from './audioDebug';
 import { createCharacter, type Character, type PlayerState } from './character';
 import { Fx, applyPixelRatio } from './fx';
 import type { Identity } from './identity';
-import { addCompoundLighting, COMPOUND_ASSET_COUNT, createCompound } from './levels/compound';
-import { Chickens } from './levels/chickens';
+import { addCompoundLighting } from './levels/compound';
+import { assetCountOf, chooseLevel, createLevel, LEVELS, selectedLevel } from './levels/registry';
+import { setGround } from './levels/ground';
+import { CHICKEN_CONFIG, Chickens } from './levels/chickens';
 import { Input, PLAYER_RADIUS, PlayerBody, RUN_SPEED, WALK_SPEED, type MoveInput } from './levels/controller';
 import { HidingController } from './levels/hiding';
 import { createLyrics } from './levels/lyrics';
 import { createRoundHud } from './levels/roundHud';
 import { TopDownCamera } from './levels/topdown';
 import { difficultyFor, award, newStats, RUN_CONFIG, verdictFor, type RunStats } from './run';
-import { Seeker, SEEKER_CONFIG } from './seeker';
+import { Seeker, SEEKER_CONFIG, type SeekerHost } from './seeker';
+import { Rain } from './levels/rain';
+import { TWIST_CONFIG, twistsFor, type Twists } from './twists';
 import { canTalkToStartNg, localNet, type BestRun, type Net } from './startng';
 import { AutoQuality, TIER_NAMES } from './quality';
 import { Screens, type BoardEntry } from './ui';
@@ -29,10 +33,6 @@ const DEV = import.meta.env.DEV;
 
 /** Everything about how the game is staged lives here; the numbers for the run itself are in RUN_CONFIG (run.ts). */
 export const GAME_CONFIG = {
-  /** Where the masquerade stands at the start of every round: at the gate, facing into the yard. */
-  seekerStart: { x: 13.2, z: 0, yaw: -Math.PI / 2 },
-  /** The turntable the player's full look turns on in the lobby. */
-  lobbyPos: { x: 0.5, z: 0.5 },
   lobbyTurnRate: 0.55, // rad/s
   /** Lobby camera offset from the turntable (m) and where it looks, so the character sits right of the menu. */
   lobbyCamera: { x: 1.3, y: 1.5, z: 4.8, lookX: -0.9, lookY: 1.0 },
@@ -78,22 +78,25 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   loadText.style.cssText = 'font:600 14px system-ui,sans-serif;opacity:.9';
   loadText.textContent = 'Loading the compound…';
   loading.append(loadTitle, loadBar, loadText);
-  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS] as const;
+  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught', 'amb_rain', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS] as const;
   let loaded = 0;
-  const loadTotal = COMPOUND_ASSET_COUNT + LOAD_CLIPS.length;
+  const levelId = selectedLevel();
+  const levelAssets = assetCountOf(levelId);
+  const loadTotal = levelAssets + LOAD_CLIPS.length;
   const tickLoad = () => {
     loaded++;
     loadFill.style.width = `${Math.round((loaded / loadTotal) * 100)}%`;
-    loadText.textContent = loaded < COMPOUND_ASSET_COUNT ? 'Loading the compound…' : 'Warming up the drums…';
+    loadText.textContent = loaded < levelAssets ? `Loading ${LEVELS.find((l) => l.id === levelId)?.name.toLowerCase() ?? 'the level'}…` : 'Warming up the drums…';
   };
 
   const scene = new THREE.Scene();
-  const [level, identityFirst] = await Promise.all([createCompound(tickLoad), net.identity(), audio.prefetch(LOAD_CLIPS, tickLoad)]).then(([l, i]) => [l, i] as const);
+  const [level, identityFirst] = await Promise.all([createLevel(levelId, tickLoad), net.identity(), audio.prefetch(LOAD_CLIPS, tickLoad)]).then(([l, i]) => [l, i] as const);
   let identity: Identity = identityFirst;
   scene.add(level.group);
   const lights = addCompoundLighting(scene, coarse ? 1024 : 2048);
 
-  const G = GAME_CONFIG;
+  setGround(level.ground);
+  const G = { ...GAME_CONFIG, seekerStart: level.seekerStart, lobbyPos: level.lobbyPos };
   const spawn = level.spawn;
   const lobbyPos = new THREE.Vector3(G.lobbyPos.x, 0.1, G.lobbyPos.z);
 
@@ -143,19 +146,17 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (tier >= 2) renderer.setPixelRatio(1);
     if (tier >= 3) fx.dust.pool.points.visible = false;
   });
-  const chickens = new Chickens(level.colliders);
+  const chickens = new Chickens(level.colliders, 5, { ...CHICKEN_CONFIG, area: level.chickenArea });
   const prints = new Footprints(scene);
   const gateMarker = createGateMarker(level.gate);
   scene.add(gateMarker.group);
   scene.add(chickens.group);
   let seeker: Seeker | null = null;
   const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: coarse || dev('buttons'), hunt: false, eye: () => seeker?.eye ?? null });
+  const seekerHost: SeekerHost = { colliders: level.colliders, bounds: level.bounds, spots: level.hidingSpots.map((s) => ({ id: s.id, position: s.position, facing: s.facing })), blocked: (a, b) => hiding.probe.blocked(a, b), prints };
+  let seeker2: Seeker | null = null;
   if (!DEV || q.get('seeker') !== '0') {
-    seeker = new Seeker(
-      { colliders: level.colliders, bounds: level.bounds, spots: level.hidingSpots.map((s) => ({ id: s.id, position: s.position, facing: s.facing })), blocked: (a, b) => hiding.probe.blocked(a, b), prints },
-      fx,
-      scene,
-    );
+    seeker = new Seeker(seekerHost, fx, scene);
     seeker.blind = true;
     seeker.reset(G.seekerStart);
     if (dev('ai')) seeker.setDebug(true);
@@ -200,15 +201,16 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   // --- the run
   const roundHud = createRoundHud();
   const lyrics = createLyrics();
+  let lastGasp = -9;
+  const gaspFor = (sk: Seeker) => () => {
+    if (performance.now() - lastGasp < 3000) return;
+    lastGasp = performance.now();
+    const at = sk.position;
+    void audio.playOnce('sfx_spotted_01', { volume: 1, rate: sk.scale < 1 ? 1.1 : 0.85, spatial: { position: { x: at.x, y: 1.6 * sk.scale, z: at.z }, refDistance: 3, maxDistance: 26, rolloff: 1.2 } });
+  };
   if (seeker) {
     // it gasps when it first suspects something
-    let lastGasp = -9;
-    seeker.onSpotted = () => {
-      if (performance.now() - lastGasp < 3000) return;
-      lastGasp = performance.now();
-      const at = seeker!.position;
-      void audio.playOnce('sfx_spotted_01', { volume: 1, rate: 0.85, spatial: { position: { x: at.x, y: 1.6, z: at.z }, refDistance: 3, maxDistance: 26, rolloff: 1.2 } });
-    };
+    seeker.onSpotted = gaspFor(seeker);
     // the spin sweep is announced a second early: a drum roll, the panels lifting, and a warning on screen
     seeker.onSpinTelegraph = () => {
       audio.drumRoll(SEEKER_CONFIG.spinTelegraph);
@@ -219,6 +221,18 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   let mode: Mode = 'lobby';
   let paused = false;
   let round = 1;
+  let twist: Twists = twistsFor(1);
+  const rain = new Rain(scene);
+  let darkNow = 0;
+  let darkTarget = 0;
+  let rainNow = 0;
+  let rainTarget = 0;
+  let rainVoice: Awaited<ReturnType<typeof audio.loop>> = null;
+  let rainFade = 0;
+  let thunderLeft = 0;
+  let bannerLeft = 0;
+  let weatherT = 0;
+  const allSeekers = (): Seeker[] => (seeker ? (seeker2 && seeker2.group.visible ? [seeker, seeker2] : [seeker]) : []);
   let runStats: RunStats = newStats();
   let prepLeft = 0;
   let huntLeft = 0;
@@ -267,6 +281,11 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     void audio.unlock().then(() => audio.playOnce(clip, { volume: 0.5 }));
   });
 
+  screens.setLevels(LEVELS, levelId, (id) => {
+    chooseLevel(id);
+    location.reload();
+  });
+
   function showLobby() {
     screens.showLobby(identity, best, board, net.signInUrl() !== null && !q.has('guest')); // ?guest means the player already chose to play as a guest
   }
@@ -292,6 +311,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     audio.cancelDrumRoll();
     body.vx = body.vz = body.vy = 0;
     pos.copy(spawn);
+    setTwists(twistsFor(1));
     if (seeker) {
       seeker.blind = true;
       seeker.frustrated = false;
@@ -338,7 +358,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   async function startRun() {
     await audio.unlock(); // the Play button is the gesture that lets sound start
     startAmbience();
-    round = 1;
+    round = DEV ? Number(q.get('round') ?? 1) : 1;
     runStats = newStats();
     lastScore = '';
     savedBest = false;
@@ -361,16 +381,30 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     pos.copy(spawn);
     yaw = 0;
     restoreLook();
+    setTwists(twistsFor(round));
     if (seeker) {
-      seeker.applyDifficulty(difficultyFor(round, cfg));
+      seeker.memory.decay(); // old habits fade a little every round
+      seeker.memory.save();
+      seeker.applyDifficulty(roundNumbers(round, false));
       seeker.frustrated = false;
       seeker.blind = true;
       seeker.reset(G.seekerStart);
+      if (seeker2 && twist.second) {
+        seeker2.applyDifficulty(roundNumbers(round, true));
+        seeker2.frustrated = false;
+        seeker2.blind = true;
+        seeker2.reset({ x: G.seekerStart.x, z: G.seekerStart.z + TWIST_CONFIG.second.startOffsetZ, yaw: G.seekerStart.yaw });
+      }
     }
     screens.setCard(null);
     roundHud.show(true);
     hiding.show(true);
     rig.snapTo(pos);
+    if (twist.title) {
+      roundHud.banner(twist.title, twist.nepa ? '#05081acc' : '#1d3a5acc');
+      bannerLeft = 3.2;
+      roundHud.popup(twist.tagline, '#ffd68a', 5);
+    }
     // the chant plays through prep; when the hider is ready (button or timer) it opens, and its last line starts the hunt
     void audio
       .startChant({
@@ -411,10 +445,11 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     player.setHuntMode(true);
     screens.setCard(identity);
     hiding.setPaletteTop(72);
-    if (seeker) {
-      seeker.blind = false;
-      seeker.reset();
+    for (const sk of allSeekers()) {
+      sk.blind = false;
+      sk.reset();
     }
+    rainFade = 0;
   }
 
   // score popups: per-second points are grouped so the screen is not a blur of numbers
@@ -428,7 +463,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       roundHud.popup(`+${Math.round(pending.survival)} Survival`, '#d8fd71');
       pending.survival = since.survival = 0;
     }
-    if (pending.nearMiss >= 1 && (all || since.nearMiss >= every.nearMiss || !seeker?.nearMiss)) {
+    if (pending.nearMiss >= 1 && (all || since.nearMiss >= every.nearMiss || !allSeekers().some((s) => s.nearMiss))) {
       roundHud.popup(`+${Math.round(pending.nearMiss)} NEAR MISS!`, '#ffb347');
       pending.nearMiss = since.nearMiss = 0;
     }
@@ -446,12 +481,13 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     flushPopups(true);
     if (camoBonus > 0) roundHud.popup(`+${camoBonus} Camo bonus (${Math.round(avgCamo)}% average)`, '#7fd6ff', 2.4);
     saveProgress(); // a cleared round counts even if the player never gets caught or closes the tab
+    seeker?.memory.save();
     roundHud.banner(ranHome ? 'YOU MADE IT HOME!' : `ROUND ${round} CLEARED!`, '#1c7a3a55');
     fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.4, pos.z), G.celebrateColors, 90);
     void audio.playOnce('jingle_win', { volume: 0.5 });
     audio.setSuspicion(0);
     audio.cancelDrumRoll();
-    if (seeker) seeker.frustrated = true;
+    for (const sk of allSeekers()) sk.frustrated = true;
     hiding.clearPose();
   }
 
@@ -613,18 +649,105 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (run && onDirt(x, z)) prints.add(x, z, yaw);
   });
   const seekerSteps = new Stepper('seeker');
+
   let seekerLastX = 0;
   let seekerLastZ = 0;
 
-  if (seeker) {
-    seeker.onCatchStart = startCatch;
-    seeker.onCaught = () => {
+  const wireCatch = (sk: Seeker) => {
+    sk.onCatchStart = startCatch;
+    sk.onCaught = () => {
       fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.2, pos.z));
       caughtDone = true;
     };
+  };
+  if (seeker) wireCatch(seeker);
+  const seekerSteps2 = new Stepper('seeker', undefined, 1.25);
+  let seeker2LastX = 0;
+  let seeker2LastZ = 0;
+
+
+  /** The seeker numbers for a round, with what the round's twist does to them. */
+  function roundNumbers(r: number, small: boolean) {
+    const n = { ...difficultyFor(r, cfg) };
+    const tc = TWIST_CONFIG;
+    if (twist.nepa) {
+      n.visionFovDeg = Math.min(n.visionFovDeg, tc.nepa.visionFovDeg);
+      n.visionRange = Math.min(n.visionRange, tc.nepa.visionRange);
+    }
+    if (small) {
+      n.patrolSpeed *= tc.second.speedMul;
+      n.investigateSpeed *= tc.second.speedMul;
+      n.checkSpeed *= tc.second.speedMul;
+      n.visionFovDeg *= tc.second.fovMul;
+    }
+    return n;
   }
 
-  const labelFor = () => (mode === 'prep' ? 'HIDE! THE MASQUERADE IS COUNTING' : mode === 'hunt' ? 'THE HUNT IS ON' : mode === 'cleared' ? 'ROUND CLEARED' : mode === 'dying' ? 'CAUGHT' : '');
+  /** The second, smaller masquerade is built the first time a round needs it (it shares the first one's patrol, so they split the yard). */
+  function ensureSecond() {
+    if (seeker2 || !seeker) return;
+    const tc = TWIST_CONFIG.second;
+    seeker2 = new Seeker(seekerHost, fx, scene, { ...SEEKER_CONFIG, radius: tc.radius, spinInterval: [1e9, 1e9] }, { share: seeker, scale: tc.scale, quiet: true });
+    seeker2.onSpotted = gaspFor(seeker2);
+    wireCatch(seeker2);
+    seeker2.blind = true;
+    seeker2.reset({ x: G.seekerStart.x, z: G.seekerStart.z + tc.startOffsetZ, yaw: G.seekerStart.yaw });
+  }
+
+  /** Switch the round's twists on or off (everything eases in over a second or two). */
+  function setTwists(t: Twists) {
+    const wasNepa = twist.nepa;
+    twist = t;
+    if (t.second) {
+      ensureSecond();
+      seeker2?.setPresent(true);
+    } else seeker2?.setPresent(false);
+    if (seeker) {
+      seeker.setLantern(t.nepa);
+      seeker.closeSense = t.nepa ? TWIST_CONFIG.nepa.senseRadius : 0;
+    }
+    darkTarget = t.nepa ? 1 : 0;
+    rainTarget = t.rain ? 1 : 0;
+    thunderLeft = TWIST_CONFIG.rain.thunder[0] + Math.random() * (TWIST_CONFIG.rain.thunder[1] - TWIST_CONFIG.rain.thunder[0]);
+    if (t.nepa && !wasNepa) void audio.unlock().then(() => audio.playOnce('sfx_power_cut', { volume: 0.8 }));
+    if (t.rain && !rainVoice) {
+      rainVoice = undefined as never;
+      void audio.unlock().then(() => audio.loop('amb_rain', { volume: 0.55, fadeIn: 2.5 })).then((v) => (rainVoice = v));
+    } else if (!t.rain && rainVoice) {
+      rainVoice.stop(2);
+      rainVoice = null;
+    }
+  }
+
+  /** Light, rain, the banner and the paint that washes out, each frame. */
+  let moodDark = -1;
+  let moodRain = -1;
+  function weather(dt: number) {
+    darkNow += (darkTarget - darkNow) * Math.min(1, dt * 2.2);
+    rainNow += (rainTarget - rainNow) * Math.min(1, dt * 1.2);
+    if (Math.abs(darkNow - moodDark) > 0.003 || Math.abs(rainNow - moodRain) > 0.003) {
+      moodDark = darkNow;
+      moodRain = rainNow;
+      lights.setMood(darkNow, rainNow);
+    }
+    rain.enabled = rainNow > 0.02;
+    weatherT += dt;
+    rain.update(dt, pos, weatherT);
+    if (bannerLeft > 0) {
+      bannerLeft -= dt;
+      if (bannerLeft <= 0 && mode !== 'cleared') roundHud.banner(null);
+    }
+    if (mode === 'hunt' && twist.rain) {
+      hiding.fadePaint(identity.style.primaryColor, identity.style.secondaryColor, 1 - Math.exp(-dt / TWIST_CONFIG.rain.fadeTau), TWIST_CONFIG.rain.refresh);
+      thunderLeft -= dt;
+      if (thunderLeft <= 0) {
+        thunderLeft = TWIST_CONFIG.rain.thunder[0] + Math.random() * (TWIST_CONFIG.rain.thunder[1] - TWIST_CONFIG.rain.thunder[0]);
+        void audio.playOnce('sfx_thunder_01', { volume: 0.5 });
+      }
+    }
+  }
+
+  const labelFor = () => (mode === 'prep' ? 'HIDE! THE MASQUERADE IS COUNTING' : mode === 'hunt' ? `THE HUNT IS ON${twist.title ? ` · ${twist.title}` : ''}` : mode === 'cleared' ? 'ROUND CLEARED' : mode === 'dying' ? 'CAUGHT' : '');
 
   function simulate(dt: number): { speed: number } {
     // lobby / results: the world idles (chickens, the masquerade at the gate), the player turns on the turntable
@@ -641,7 +764,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
         player.group.rotation.y = yaw;
         player.update(dt);
       }
-      if (seeker) seeker.update(dt, { ...sense, camo: 100, speed: 0 });
+      for (const sk of allSeekers()) sk.update(dt, { ...sense, camo: 100, speed: 0 });
       chickens.update(dt, []);
       return { speed: 0 };
     }
@@ -687,15 +810,25 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       if (dt > 0) seekerSteps.advance(dt, seeker.position.x, seeker.position.z, Math.hypot(seeker.position.x - seekerLastX, seeker.position.z - seekerLastZ) / dt);
       seekerLastX = seeker.position.x;
       seekerLastZ = seeker.position.z;
+      if (seeker2 && seeker2.group.visible) {
+        seeker2.update(dt, sense);
+        if (dt > 0) seekerSteps2.advance(dt, seeker2.position.x, seeker2.position.z, Math.hypot(seeker2.position.x - seeker2LastX, seeker2.position.z - seeker2LastZ) / dt);
+        seeker2LastX = seeker2.position.x;
+        seeker2LastZ = seeker2.position.z;
+        if (seeker2.suspicion > seeker.suspicion) audio.setSuspicion(seeker2.suspicion);
+      }
     }
     const squawks = chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])], {
       active: mode === 'hunt' && !!seeker && !seeker.blind && !seeker.frustrated,
       player: pos,
-      seeker: seeker ? seeker.position : null,
+      seekers: allSeekers().map((s) => s.position),
     });
     for (const sq of squawks) {
       void audio.squawk(sq.x, sq.z);
-      if (sq.first && seeker?.glance(sq.x, sq.z)) roundHud.popup('A chicken is giving you away!', '#ffb347', 2);
+      if (sq.first) {
+        const near = allSeekers().find((s) => Math.hypot(s.position.x - sq.x, s.position.z - sq.z) <= 8 && s.glance(sq.x, sq.z));
+        if (near) roundHud.popup('A chicken is giving you away!', '#ffb347', 2);
+      }
     }
     prints.update(dt);
 
@@ -724,14 +857,14 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       award(runStats, 'survival', dt * sc.survivalPerSecond);
       pending.survival += dt * sc.survivalPerSecond;
       since.survival += dt;
-      if (seeker?.nearMiss) {
+      if (allSeekers().some((s) => s.nearMiss)) {
         award(runStats, 'nearMiss', dt * sc.nearMissPerSecond);
         pending.nearMiss += dt * sc.nearMissPerSecond;
         since.nearMiss += dt;
       }
       flushPopups();
       // the way home
-      const open = !!seeker && !seeker.blind && Math.hypot(seeker.position.x - level.gate.x, seeker.position.z - level.gate.z) > cfg.runHome.seekerDistance;
+      const open = !!seeker && !seeker.blind && allSeekers().every((s) => Math.hypot(s.position.x - level.gate.x, s.position.z - level.gate.z) > cfg.runHome.seekerDistance);
       if (open && !runHomeWasOpen && !hintSeen) {
         hintSeen = true;
         try {
@@ -772,6 +905,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       }
     }
     simulate(dt * timeScale);
+    weather(dt);
     gateTime += dt;
     gateMarker.update(gateTime, runHomeWasOpen && mode === 'hunt', mode === 'prep' || mode === 'hunt');
     if (mode !== 'lobby' && mode !== 'results') {
@@ -852,6 +986,14 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       input,
       body,
       seeker,
+      get seeker2() {
+        return seeker2;
+      },
+      get twist() {
+        return twist;
+      },
+      rain,
+      lights,
       chickens,
       hiding,
       level,

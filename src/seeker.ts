@@ -13,6 +13,7 @@ import { resolveCollisions, type Collider } from './levels/controller';
 import type { Nav } from './nav';
 import { Coverage, COVERAGE_CONFIG } from './levels/coverage';
 import { Patrol, type Stop } from './patrol';
+import { MEMORY_CONFIG, SeekerMemory } from './memory';
 
 export const SEEKER_CONFIG = {
   // --- senses
@@ -99,6 +100,12 @@ export const SEEKER_CONFIG = {
   /** The player counts as having a near miss inside the cone and visible, at most this far away (m). */
   nearMissRange: 8,
 
+  // --- the lantern it carries in a blackout (NEPA took the light)
+  lanternColor: '#ffb15c',
+  lanternIntensity: 140,
+  lanternRange: 15,
+  lanternAngle: 0.38,
+
   // --- chickens that snitch: how long it stares where the squawk came from (s), and how long before another squawk can turn its head
   glanceSeconds: 2.4,
   glanceCooldown: 5,
@@ -107,6 +114,15 @@ export const SEEKER_CONFIG = {
   cheatInterval: 15, // s
   cheatCandidates: 3, // the nearest spots to the player's actual position; one of them is checked
 };
+
+export interface SeekerOptions {
+  /** A second masquerade shares the first one's grid, patrol and memory, so the two split the yard between them. */
+  share?: Seeker;
+  /** Size of the figure (1 = full). Its eye, cone and spin ring are scaled to match. */
+  scale?: number;
+  /** Do not drive the heartbeat (the other masquerade does). */
+  quiet?: boolean;
+}
 
 export type SeekerState = 'spin_wind' | 'spin' | 'patrol_walk' | 'patrol_look' | 'investigate_walk' | 'investigate_look' | 'check_walk' | 'check_look' | 'suspicious' | 'catch' | 'caught';
 
@@ -184,6 +200,12 @@ export class Seeker {
   readonly buildMs: number;
   readonly cov: Coverage;
   readonly patrol: Patrol;
+  readonly memory: SeekerMemory;
+  readonly scale: number;
+  private quiet: boolean;
+  private ownsPatrol: boolean;
+  private lantern: THREE.Group;
+  private beam: THREE.SpotLight;
   private curStop: Stop | null = null;
   private sweeping = false;
   private chasing = false;
@@ -194,6 +216,8 @@ export class Seeker {
   private trailSeen = 0;
   private printT = 0;
   private curiousT = 0;
+  /** In a blackout it still notices anything this close, however dark (m). 0 = off. */
+  closeSense = 0;
   private glanceT = 0;
   private chaseT = 0;
   private cheatTimer = 0;
@@ -219,10 +243,17 @@ export class Seeker {
     scene: THREE.Scene,
     /** A private copy, so a run can sharpen this seeker without touching SEEKER_CONFIG. */
     private cfg = { ...SEEKER_CONFIG },
+    opts: SeekerOptions = {},
   ) {
+    this.scale = opts.scale ?? 1;
+    this.quiet = !!opts.quiet;
+    this.ownsPatrol = !opts.share;
     this.masq = createMasquerade();
     this.group = this.masq.group;
+    this.group.scale.setScalar(this.scale);
+    this.cfg.eyeHeight *= this.scale;
     this.cone = fx.addVisionCone(this.group, cfg.visionRange, cfg.visionFovDeg);
+    this.cone.mesh.scale.setScalar(1 / this.scale);
     this.indicator = fx.addSuspicionIndicator(this.group);
     this.ring = new THREE.Mesh(
       new THREE.RingGeometry(cfg.spinRadius - 0.45, cfg.spinRadius, 56).rotateX(-Math.PI / 2),
@@ -230,12 +261,31 @@ export class Seeker {
     );
     this.ring.position.y = 0.06;
     this.ring.visible = false;
+    this.ring.scale.setScalar(1 / this.scale);
     this.group.add(this.ring);
+    this.lantern = new THREE.Group();
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.2, 8), new THREE.MeshBasicMaterial({ color: '#ffd68a' }));
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.03, 8), new THREE.MeshBasicMaterial({ color: '#2a1d12' }));
+    cap.position.y = 0.115;
+    this.lantern.add(glass, cap);
+    this.lantern.position.set(0.52, 1.0, 0.42);
+    this.lantern.visible = false;
+    this.beam = new THREE.SpotLight(SEEKER_CONFIG.lanternColor, 0, SEEKER_CONFIG.lanternRange, SEEKER_CONFIG.lanternAngle, 0.55, 1.2);
+    this.beam.position.copy(this.lantern.position);
+    this.beam.target.position.set(0.52, 0.2, 8);
+    this.group.add(this.lantern, this.beam, this.beam.target);
     scene.add(this.group, this.debugGroup);
     const t0 = performance.now();
-    this.cov = new Coverage(host.colliders, host.bounds, { ...COVERAGE_CONFIG, cell: cfg.navCell, seekerRadius: cfg.radius + 0.05 });
+    if (opts.share) {
+      this.cov = opts.share.cov;
+      this.memory = opts.share.memory;
+      this.patrol = opts.share.patrol;
+    } else {
+      this.cov = new Coverage(host.colliders, host.bounds, { ...COVERAGE_CONFIG, cell: cfg.navCell, seekerRadius: cfg.radius + 0.05 });
+      this.memory = new SeekerMemory(this.cov);
+      this.patrol = new Patrol(this.cov, host.spots, (s) => this.standPoint(s), undefined, this.memory);
+    }
     this.nav = this.cov.seeker;
-    this.patrol = new Patrol(this.cov, host.spots, (s) => this.standPoint(s));
     this.buildMs = Math.round(performance.now() - t0);
     this.group.traverse((o) => {
       if (o instanceof THREE.Mesh && !(o.material instanceof THREE.ShaderMaterial)) o.castShadow = true;
@@ -257,7 +307,19 @@ export class Seeker {
     if (resize) {
       this.fx.removeVisionCone(this.cone);
       this.cone = this.fx.addVisionCone(this.group, this.cfg.visionRange, this.cfg.visionFovDeg);
+      this.cone.mesh.scale.setScalar(1 / this.scale);
     }
+  }
+
+  /** The lantern it carries in a blackout: a lit lamp in its hand and a narrow beam ahead. */
+  setLantern(on: boolean): void {
+    this.lantern.visible = on;
+    this.beam.intensity = on ? SEEKER_CONFIG.lanternIntensity : 0;
+  }
+
+  /** Hide the whole figure (a second masquerade that is not in this round). */
+  setPresent(on: boolean): void {
+    this.group.visible = on;
   }
 
   setDebug(on: boolean): void {
@@ -283,6 +345,7 @@ export class Seeker {
     this.noiseTimer = 0;
     this.speed = 0;
     this.endSpin(false);
+    this.patrol?.beginRound();
     this.spinIn = rand(...this.cfg.spinInterval);
     this.trailId = null;
     this.trailSeen = 0;
@@ -324,7 +387,7 @@ export class Seeker {
     this.chasing = false;
     const tried = new Set<Stop>();
     for (let tries = 0; tries < 5; tries++) {
-      const stop = this.patrol.next(this.pos.x, this.pos.z, tried);
+      const stop = this.patrol.next(this.pos.x, this.pos.z, tried, this);
       tried.add(stop);
       if (this.goTo(stop.x, stop.z, `patrol: ${stop.id}`)) {
         this.curStop = stop;
@@ -380,7 +443,7 @@ export class Seeker {
     this.noiseTimer = Math.max(0, this.noiseTimer - dt);
     this.glanceT = Math.max(0, this.glanceT - dt);
     this.cheatTimer += dt;
-    this.patrol.tick(dt);
+    if (this.ownsPatrol) this.patrol.tick(dt);
     this.eye.set(this.pos.x + Math.sin(this.yaw) * 0.12, cfg.eyeHeight, this.pos.z + Math.cos(this.yaw) * 0.12);
 
     if (this.state === 'caught') {
@@ -425,6 +488,7 @@ export class Seeker {
         } else if (this.suspicion >= cfg.leanAt && this.state !== 'suspicious') {
           this.endSpin(false);
           this.state = 'suspicious';
+          this.memory.note(p.position.x, p.position.z, MEMORY_CONFIG.suspectedHeat);
           this.onSpotted?.();
           this.path = [];
         } else if (this.state === 'suspicious' && this.suspicion < cfg.leanExit) {
@@ -515,6 +579,8 @@ export class Seeker {
           this.state = 'caught';
           this.caughtT = 0;
           this.suspicion = 1;
+          this.memory.note(p.position.x, p.position.z, MEMORY_CONFIG.caughtHeat);
+          this.memory.save();
           this.onCaught?.();
         }
         break;
@@ -665,7 +731,7 @@ export class Seeker {
     this.cone.mesh.visible = !this.blind && !this.frustrated && this.state !== 'caught';
     this.cone.setSuspicion(this.suspicion);
     this.indicator.set(this.suspicion);
-    audio.setSuspicion(this.suspicion);
+    if (!this.quiet) audio.setSuspicion(this.suspicion);
   }
 
   // --- senses ---------------------------------------------------------------------------------------------------------------
@@ -675,7 +741,7 @@ export class Seeker {
     const dx = p.position.x - this.pos.x;
     const dz = p.position.z - this.pos.z;
     const d = Math.hypot(dx, dz);
-    const inCone = this.state === 'spin' ? d <= cfg.spinRadius : d <= cfg.visionRange && (d < 0.2 || (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d >= Math.cos(THREE.MathUtils.degToRad(cfg.visionFovDeg / 2)));
+    const inCone = this.state === 'spin' ? d <= cfg.spinRadius : d <= this.closeSense ? true : d <= cfg.visionRange && (d < 0.2 || (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d >= Math.cos(THREE.MathUtils.degToRad(cfg.visionFovDeg / 2)));
 
     this.losT += dt;
     if (inCone) {
