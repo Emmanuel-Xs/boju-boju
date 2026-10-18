@@ -71,7 +71,7 @@ export class Screens {
   }
 
   // --- lobby
-  showLobby(id: Identity, best: { rounds: number; hidden: number; camo: number } | null, board: BoardEntry[] | null, canSignIn: boolean): void {
+  showLobby(id: Identity, best: { score: number; rounds: number; camo: number } | null, board: BoardEntry[] | null, canSignIn: boolean): void {
     this.hideAll();
     this.lobby.replaceChildren();
     // on a tall phone screen the menu stacks under the turntable
@@ -90,7 +90,7 @@ export class Screens {
     names.append(el('div', 'font:800 22px system-ui', id.name), el('div', 'font:12px system-ui;opacity:.75', id.account ? `@${id.account}` : id.signedIn ? '' : 'Playing as a guest'));
     who.append(face, names);
     left.append(who);
-    left.append(el('div', 'padding:8px 14px;background:#150c0acc;border-radius:12px;font:600 14px system-ui', best ? `Your best run: ${best.rounds} round${best.rounds === 1 ? '' : 's'} · ${clock(best.hidden)} hidden · ${best.camo}% camo` : id.signedIn ? 'No run saved yet. Go on, hide!' : 'Sign in to save your best run.'));
+    left.append(el('div', 'padding:8px 14px;background:#150c0acc;border-radius:12px;font:600 14px system-ui', best ? `Your best run: ${best.score} points · ${best.rounds} round${best.rounds === 1 ? '' : 's'} · ${best.camo}% camo` : id.signedIn ? 'No run saved yet. Go on, hide!' : 'Sign in to save your best run.'));
     const play = el('button', BUTTON + ';font-size:20px;min-height:56px', 'Play');
     play.onclick = () => this.h.play();
     left.append(play);
@@ -139,12 +139,12 @@ export class Screens {
     box.append(el('div', 'font:800 15px system-ui;margin-bottom:6px', title));
     const t = el('table', 'width:100%;border-collapse:collapse;font:13px system-ui');
     const head = el('tr', 'opacity:.6;font-size:11px;text-align:right');
-    for (const [i, h] of ['#', 'Hider', 'Rounds', 'Hidden', 'Camo'].entries()) head.append(el('td', `padding:2px 6px;${i < 2 ? 'text-align:left' : ''}`, h));
+    for (const [i, h] of ['#', 'Hider', 'Score', 'Rounds', 'Camo'].entries()) head.append(el('td', `padding:2px 6px;${i < 2 ? 'text-align:left' : ''}`, h));
     t.append(head);
     for (const e of board.slice(0, 10)) {
       const mine = myId !== null && e.player_id === myId;
       const tr = el('tr', `text-align:right;${mine ? `background:${ACCENT};color:#1f2118;font-weight:800` : ''}`);
-      const cells = [String(e.rank), e.name, String(e.stats.rounds ?? e.score), clock(e.stats.hidden ?? 0), `${e.stats.camo ?? 0}%`];
+      const cells = [String(e.rank), e.name, String(e.stats.score ?? e.score), String(e.stats.rounds ?? 0), `${e.stats.camo ?? 0}%`];
       cells.forEach((c, i) => tr.append(el('td', `padding:3px 6px;${i < 2 ? 'text-align:left' : ''}${i === 1 ? ';max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' : ''}`, c)));
       t.append(tr);
     }
@@ -159,11 +159,18 @@ export class Screens {
     const wrap = el('div', 'display:flex;flex-wrap:wrap;gap:16px;justify-content:center;padding:20px;max-width:900px');
     const card = el('div', 'background:#291410f2;border:1px solid #fff3;border-radius:20px;padding:20px 22px;width:min(420px,100%);display:flex;flex-direction:column;gap:10px');
     card.append(el('div', 'font:800 34px system-ui;letter-spacing:1px', 'Run over'));
+    const total = el('div', 'display:flex;justify-content:space-between;align-items:baseline;font:800 28px system-ui;padding:4px 0 8px;border-bottom:2px solid #fff4');
+    total.append(el('span', '', 'Score'), el('b', `color:${ACCENT}`, String(stats.score)));
+    card.append(total);
     const rows: [string, string][] = [
+      ['Survival', String(stats.parts.survival)],
+      ['Near misses', String(stats.parts.nearMiss)],
+      ['Ready early', String(stats.parts.ready)],
+      ['Run home', String(stats.parts.runHome)],
+      ['Camo bonus', String(stats.parts.camo)],
       ['Rounds survived', String(stats.rounds)],
       ['Time hidden', clock(stats.hiddenSeconds)],
       ['Best camo', `${stats.bestCamo}%`],
-      ['Points', String(stats.points)],
     ];
     for (const [k, v] of rows) {
       const r = el('div', 'display:flex;justify-content:space-between;font:600 16px system-ui;padding:4px 0;border-bottom:1px solid #fff2');

@@ -1,6 +1,7 @@
 // Footsteps for the player and the masquerade. A step sounds every `stride` metres walked, so fast feet make fast steps.
 // The masquerade's steps are placed in the world and heavier; hearing them coming is part of the game.
 import { audio, type ClipName } from './audio';
+import { onDirt } from './levels/ground';
 
 export const FOOTSTEP_CONFIG = {
   /** Metres between steps. */
@@ -10,26 +11,22 @@ export const FOOTSTEP_CONFIG = {
   minSpeed: 0.5,
   player: { volume: 0.3, runVolume: 0.42, rateJitter: 0.08 },
   seeker: { volume: 0.75, rate: 0.78, rateJitter: 0.05, refDistance: 3, maxDistance: 26, rolloff: 1.4 },
-  /** The bare-dirt patch and everything outside the yard sounds like sand; the yard floor and verandas like concrete. */
-  yard: { halfX: 15, halfZ: 9 },
-  dirt: { x: 12.2, z: 0, halfX: 2.5, halfZ: 3.5 },
   /** How many recorded variations each surface has. */
   variations: 5,
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-function surfaceAt(x: number, z: number): 'concrete' | 'sand' {
-  const c = FOOTSTEP_CONFIG;
-  if (Math.abs(x) > c.yard.halfX || Math.abs(z) > c.yard.halfZ) return 'sand';
-  if (Math.abs(x - c.dirt.x) < c.dirt.halfX && Math.abs(z - c.dirt.z) < c.dirt.halfZ) return 'sand';
-  return 'concrete';
-}
+const surfaceAt = (x: number, z: number): 'concrete' | 'sand' => (onDirt(x, z) ? 'sand' : 'concrete');
 
 export class Stepper {
   private walked = 0;
   private last = -1;
-  constructor(private who: 'player' | 'seeker') {}
+  constructor(
+    private who: 'player' | 'seeker',
+    /** Called on every step the player takes (where, and whether running). */
+    private onStep?: (x: number, z: number, run: boolean) => void,
+  ) {}
 
   /** Advance by `dt` seconds at `speed` m/s. */
   advance(dt: number, x: number, z: number, speed: number, grounded = true): void {
@@ -46,6 +43,7 @@ export class Stepper {
     if (n === this.last) n = (n + 1) % c.variations; // never the same recording twice in a row
     this.last = n;
     const clip = `sfx_step_${surfaceAt(x, z)}_${pad(n + 1)}` as ClipName;
+    this.onStep?.(x, z, run);
     if (this.who === 'player') {
       void audio.playOnce(clip, { volume: run ? c.player.runVolume : c.player.volume, rate: 1 + (Math.random() * 2 - 1) * c.player.rateJitter });
     } else {

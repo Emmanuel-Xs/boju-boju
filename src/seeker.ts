@@ -1,13 +1,18 @@
-// The masquerade seeker: patrols the hiding spots, hears footsteps, sees through a 70 degree cone, and grows suspicious of a badly camouflaged player.
-//   Senses:     vision cone with raycast line of sight (walls and big props block it), hearing (running 6 m, walking 2 m).
-//   Suspicion:  0..1. Rises while the player is in the cone and visible, at a rate set by (100 - camo score) and distance. 0.5: stop and lean in. 1.0: lunge, caught.
-//   Behaviour:  patrol the spots in shuffled order with a look-around at each; investigate noises; every 15 s peek at one of the 3 spots nearest the player (a little cheating).
+// The masquerade seeker: patrols (see patrol.ts: it walks to wherever it has not looked for longest), hears footsteps, sees through a cone with raycast
+// line of sight, follows fresh footprints, and every so often does a spin sweep that sees all the way round.
+//   Senses:     vision cone with raycast line of sight (walls and big props block it), hearing (running 6 m, walking 2 m), footprints.
+//   Suspicion:  0..1. Rises while the player is in the cone and visible, at a rate set by (100 - camo score) and distance. 0.5: stop and lean in.
+//   Catching:   by sight. At 1.0, with the player visible within catchRange, it lunges (no touching needed); further away it closes in first.
+//   Body:       a small capsule (radius 0.6 m) on a 0.5 m walkable grid; A* paths are string-pulled and rounded. The cloth panels never collide.
 // Every number lives in SEEKER_CONFIG.
 import * as THREE from 'three';
 import { audio } from './audio';
 import type { Fx, SuspicionIndicator, VisionCone } from './fx';
 import { createMasquerade, type Masquerade, type MasqueradeState } from './masquerade';
 import { resolveCollisions, type Collider } from './levels/controller';
+import type { Nav } from './nav';
+import { Coverage, COVERAGE_CONFIG } from './levels/coverage';
+import { Patrol, type Stop } from './patrol';
 
 export const SEEKER_CONFIG = {
   // --- senses
@@ -39,6 +44,9 @@ export const SEEKER_CONFIG = {
   seenDecay: 0.02,
   /** ...and while out of sight (slow, so a seeker stays jumpy for a while). */
   lostDecay: 0.08,
+  /** A glimpse this suspicious sends it to take a closer look at where it saw something, before it leans in. */
+  curiousAt: 0.2,
+  curiousCooldown: 4, // s between such trips
   leanAt: 0.5, // stop and lean in
   leanExit: 0.35, // stop leaning once suspicion falls below this
   catchAt: 1,
@@ -49,23 +57,54 @@ export const SEEKER_CONFIG = {
   checkSpeed: 3.6,
   turnRate: 6, // 1/s, how quickly the body turns to face where it is going
   arriveRadius: 0.5,
-  radius: 0.5, // body radius used for navigation and collisions
-  navCell: 0.4,
+  /** The physics body is a small capsule this wide (m). The cloth panels are only drawn, they never collide with anything. */
+  radius: 0.6,
+  /** Cells of the walkable grid baked from the level colliders (m). */
+  navCell: 0.5,
+  /** Corners of a path are cut by up to this much (m), so it walks curves and not zig-zags. */
+  pathRound: 0.9,
   lookTime: [2.5, 4] as [number, number], // pause at each patrol point
   investigateLookTime: [2.5, 3.5] as [number, number],
   lookSweepAngle: 0.9, // rad: how far the body swings left and right while looking around
   checkStandOff: 2, // m from a hiding spot the seeker stands at when checking it (on the open side)
-  catchDashSpeed: 8,
-  catchReach: 1,
-  catchDashMax: 0.5, // s
+  /** A catch is by sight: suspicion full, the player in view and this close (m). No touching needed. */
+  catchRange: 6,
+  /** The lunge toward the player: how long it takes (s) and how far the masquerade steps in (m). */
+  catchLungeSeconds: 0.5,
+  catchLungeDistance: 1.6,
+  /** Suspicion is full but the player is further than catchRange: the masquerade closes in at this speed (m/s), re-aiming this often (s). */
+  chaseSpeed: 4.6,
+  chaseRetarget: 0.35,
   caughtTime: 2.8, // s of victory dance before the round resets
+
+  // --- the spin sweep: every so often it twirls, and for a moment sees all the way round
+  /** Seconds between sweeps (a random time in this range after each one). */
+  spinInterval: [18, 25] as [number, number],
+  /** The warning before it (s): a drum roll, the panels lift and it stands trembling. */
+  spinTelegraph: 1,
+  spinSeconds: 1.5,
+  /** During the spin it sees every direction inside this distance (m). */
+  spinRadius: 5,
+
+  // --- footprints and the trail
+  /** A print older than this (s) is too faded to notice; one further away than printRange (m) is not seen. */
+  printNoticeAge: 8,
+  printRange: 9,
+  /** The next print on a trail is within this distance of the last (m). */
+  printStep: 3.5,
+  /** Speed on a trail (m/s). */
+  trailSpeed: 4.2,
+
+  // --- scoring hook
+  /** The player counts as having a near miss inside the cone and visible, at most this far away (m). */
+  nearMissRange: 8,
 
   // --- cheating
   cheatInterval: 15, // s
   cheatCandidates: 3, // the nearest spots to the player's actual position; one of them is checked
 };
 
-export type SeekerState = 'patrol_walk' | 'patrol_look' | 'investigate_walk' | 'investigate_look' | 'check_walk' | 'check_look' | 'suspicious' | 'catch' | 'caught';
+export type SeekerState = 'spin_wind' | 'spin' | 'patrol_walk' | 'patrol_look' | 'investigate_walk' | 'investigate_look' | 'check_walk' | 'check_look' | 'suspicious' | 'catch' | 'caught';
 
 export interface SpotInfo {
   id: string;
@@ -81,6 +120,8 @@ export interface SeekerHost {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** True when something solid sits between the two points. */
   blocked(from: THREE.Vector3, to: THREE.Vector3): boolean;
+  /** Footprints on the floor, oldest first. */
+  prints?: { list(): readonly { id: number; x: number; z: number; age: number }[] };
 }
 
 export interface PlayerSense {
@@ -92,179 +133,6 @@ export interface PlayerSense {
   /** Camo score 0..100, as seen from the seeker. */
   camo: number;
   pose: string | null;
-}
-
-// --- navigation grid -------------------------------------------------------------------------------------------------------
-
-class Nav {
-  readonly w: number;
-  readonly h: number;
-  private blocked: Uint8Array;
-
-  constructor(
-    colliders: readonly Collider[],
-    private bounds: SeekerHost['bounds'],
-    radius: number,
-    readonly cell: number,
-  ) {
-    this.w = Math.ceil((bounds.maxX - bounds.minX) / cell);
-    this.h = Math.ceil((bounds.maxZ - bounds.minZ) / cell);
-    this.blocked = new Uint8Array(this.w * this.h);
-    for (let iz = 0; iz < this.h; iz++) {
-      for (let ix = 0; ix < this.w; ix++) {
-        const x = bounds.minX + (ix + 0.5) * cell;
-        const z = bounds.minZ + (iz + 0.5) * cell;
-        let b = false;
-        for (const c of colliders) {
-          if (c.climb && c.top <= 0.25) continue; // a low plank floor or kerb: walkable
-          if (c.kind === 'box') {
-            const dx = Math.max(c.minX - x, 0, x - c.maxX);
-            const dz = Math.max(c.minZ - z, 0, z - c.maxZ);
-            if (dx * dx + dz * dz < radius * radius) b = true;
-          } else if ((x - c.x) ** 2 + (z - c.z) ** 2 < (radius + c.r) ** 2) b = true;
-          if (b) break;
-        }
-        this.blocked[iz * this.w + ix] = b ? 1 : 0;
-      }
-    }
-  }
-
-  private ix(x: number) {
-    return Math.floor((x - this.bounds.minX) / this.cell);
-  }
-  private iz(z: number) {
-    return Math.floor((z - this.bounds.minZ) / this.cell);
-  }
-  private isBlockedCell(ix: number, iz: number) {
-    return ix < 0 || iz < 0 || ix >= this.w || iz >= this.h || this.blocked[iz * this.w + ix] === 1;
-  }
-  free(x: number, z: number): boolean {
-    return !this.isBlockedCell(this.ix(x), this.iz(z));
-  }
-
-  /** The closest walkable point to (x, z), searching outwards in rings. */
-  nearestFree(x: number, z: number, maxRing = 12): { x: number; z: number } | null {
-    const cx = this.ix(x);
-    const cz = this.iz(z);
-    if (!this.isBlockedCell(cx, cz)) return { x, z };
-    let best: { x: number; z: number } | null = null;
-    let bestD = Infinity;
-    for (let r = 1; r <= maxRing; r++) {
-      for (let dz = -r; dz <= r; dz++) {
-        for (let dx = -r; dx <= r; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r || this.isBlockedCell(cx + dx, cz + dz)) continue;
-          const px = this.bounds.minX + (cx + dx + 0.5) * this.cell;
-          const pz = this.bounds.minZ + (cz + dz + 0.5) * this.cell;
-          const d = (px - x) ** 2 + (pz - z) ** 2;
-          if (d < bestD) {
-            bestD = d;
-            best = { x: px, z: pz };
-          }
-        }
-      }
-      if (best) return best;
-    }
-    return null;
-  }
-
-  lineClear(a: { x: number; z: number }, b: { x: number; z: number }): boolean {
-    const d = Math.hypot(b.x - a.x, b.z - a.z);
-    const n = Math.max(1, Math.ceil(d / (this.cell * 0.5)));
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;
-      if (!this.free(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t)) return false;
-    }
-    return true;
-  }
-
-  /** A* over the grid (8 neighbours), then string-pulled into a few waypoints. Null if there is no way. */
-  path(from: { x: number; z: number }, to: { x: number; z: number }): { x: number; z: number }[] | null {
-    const s = this.nearestFree(from.x, from.z, 4);
-    const g = this.nearestFree(to.x, to.z, 12);
-    if (!s || !g) return null;
-    const w = this.w;
-    const start = this.iz(s.z) * w + this.ix(s.x);
-    const goal = this.iz(g.z) * w + this.ix(g.x);
-    const gScore = new Float32Array(this.w * this.h).fill(Infinity);
-    const prev = new Int32Array(this.w * this.h).fill(-1);
-    const closed = new Uint8Array(this.w * this.h);
-    const heap: [number, number][] = [[0, start]]; // [f, node]
-    gScore[start] = 0;
-    const push = (item: [number, number]) => {
-      heap.push(item);
-      let i = heap.length - 1;
-      while (i > 0) {
-        const p = (i - 1) >> 1;
-        if (heap[p][0] <= heap[i][0]) break;
-        [heap[p], heap[i]] = [heap[i], heap[p]];
-        i = p;
-      }
-    };
-    const pop = () => {
-      const top = heap[0];
-      const last = heap.pop()!;
-      if (heap.length) {
-        heap[0] = last;
-        let i = 0;
-        for (;;) {
-          const l = i * 2 + 1;
-          const r = l + 1;
-          let m = i;
-          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-          if (m === i) break;
-          [heap[m], heap[i]] = [heap[i], heap[m]];
-          i = m;
-        }
-      }
-      return top;
-    };
-    const gx = goal % w;
-    const gz = Math.floor(goal / w);
-    let found = false;
-    while (heap.length) {
-      const [, n] = pop();
-      if (closed[n]) continue;
-      closed[n] = 1;
-      if (n === goal) {
-        found = true;
-        break;
-      }
-      const nx = n % w;
-      const nz = Math.floor(n / w);
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dz) continue;
-          const mx = nx + dx;
-          const mz = nz + dz;
-          if (this.isBlockedCell(mx, mz)) continue;
-          if (dx && dz && (this.isBlockedCell(nx + dx, nz) || this.isBlockedCell(nx, nz + dz))) continue; // no cutting corners
-          const m = mz * w + mx;
-          if (closed[m]) continue;
-          const step = gScore[n] + (dx && dz ? 1.414 : 1);
-          if (step < gScore[m]) {
-            gScore[m] = step;
-            prev[m] = n;
-            push([step + Math.hypot(gx - mx, gz - mz), m]);
-          }
-        }
-      }
-    }
-    if (!found) return null;
-    const cells: { x: number; z: number }[] = [];
-    for (let n = goal; n !== -1; n = prev[n]) cells.push({ x: this.bounds.minX + ((n % w) + 0.5) * this.cell, z: this.bounds.minZ + (Math.floor(n / w) + 0.5) * this.cell });
-    cells.reverse();
-    // string pulling: keep only the corners that matter
-    const out: { x: number; z: number }[] = [];
-    let anchor = 0;
-    while (anchor < cells.length - 1) {
-      let far = cells.length - 1;
-      while (far > anchor + 1 && !this.lineClear(cells[anchor], cells[far])) far--;
-      out.push(cells[far]);
-      anchor = far;
-    }
-    return out;
-  }
 }
 
 // --- the seeker -------------------------------------------------------------------------------------------------------
@@ -282,6 +150,10 @@ export class Seeker {
   onCaught: (() => void) | null = null;
   /** Called when the lunge starts (suspicion reached 1), a little before `onCaught`. */
   onCatchStart: (() => void) | null = null;
+  /** The warning before a spin sweep starts / the sweep starts / it ends. */
+  onSpinTelegraph: (() => void) | null = null;
+  onSpinStart: (() => void) | null = null;
+  onSpinEnd: (() => void) | null = null;
   /** Eyes covered (the prep phase): it stands still singing and notices nothing. */
   blind = false;
   /** Cleared round: it stands still, looking around in annoyance, and notices nothing. */
@@ -296,13 +168,27 @@ export class Seeker {
   private path: { x: number; z: number }[] = [];
   private pathIdx = 0;
   private stuckT = 0;
+  private stuckFails = 0;
   private stuckFrom = new THREE.Vector2();
   private lookT = 0;
   private lookDur = 3;
   private lookBase = 0;
   private lookAt: THREE.Vector3 | null = null;
-  private order: number[] = [];
-  private orderIdx = 0;
+  /** How long baking the grid and the patrol stops took (ms). */
+  readonly buildMs: number;
+  readonly cov: Coverage;
+  readonly patrol: Patrol;
+  private curStop: Stop | null = null;
+  private sweeping = false;
+  private chasing = false;
+  private spinIn = 20;
+  private spinT = 0;
+  private ring: THREE.Mesh;
+  private trailId: number | null = null;
+  private trailSeen = 0;
+  private printT = 0;
+  private curiousT = 0;
+  private chaseT = 0;
   private cheatTimer = 0;
   private noiseTimer = 0;
   private lastSeen: THREE.Vector3 | null = null;
@@ -317,7 +203,7 @@ export class Seeker {
   private debugOn = false;
   private line: THREE.Line;
   private tmp = new THREE.Vector3();
-  private sense = { inCone: false, rate: 0, exposure: 0, distFactor: 0, dist: 0, heard: '' };
+  private sense = { inCone: false, rate: 0, exposure: 0, distFactor: 0, dist: 0, heard: '', canCatch: false };
   private pathAge = 0;
 
   constructor(
@@ -331,8 +217,19 @@ export class Seeker {
     this.group = this.masq.group;
     this.cone = fx.addVisionCone(this.group, cfg.visionRange, cfg.visionFovDeg);
     this.indicator = fx.addSuspicionIndicator(this.group);
+    this.ring = new THREE.Mesh(
+      new THREE.RingGeometry(cfg.spinRadius - 0.45, cfg.spinRadius, 56).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: '#ffb347', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.ring.position.y = 0.06;
+    this.ring.visible = false;
+    this.group.add(this.ring);
     scene.add(this.group, this.debugGroup);
-    this.nav = new Nav(host.colliders, host.bounds, cfg.radius + 0.05, cfg.navCell);
+    const t0 = performance.now();
+    this.cov = new Coverage(host.colliders, host.bounds, { ...COVERAGE_CONFIG, cell: cfg.navCell, seekerRadius: cfg.radius + 0.05 });
+    this.nav = this.cov.seeker;
+    this.patrol = new Patrol(this.cov, host.spots, (s) => this.standPoint(s));
+    this.buildMs = Math.round(performance.now() - t0);
     this.group.traverse((o) => {
       if (o instanceof THREE.Mesh && !(o.material instanceof THREE.ShaderMaterial)) o.castShadow = true;
     });
@@ -378,7 +275,10 @@ export class Seeker {
     this.cheatTimer = 0;
     this.noiseTimer = 0;
     this.speed = 0;
-    this.shuffle();
+    this.endSpin(false);
+    this.spinIn = rand(...this.cfg.spinInterval);
+    this.trailId = null;
+    this.trailSeen = 0;
     if (at) this.placeAt(at.x, at.z, at.yaw ?? this.yaw);
     this.startPatrol();
     this.applyFx();
@@ -392,19 +292,10 @@ export class Seeker {
     this.path = [];
   }
 
-  private shuffle(): void {
-    this.order = this.host.spots.map((_, i) => i);
-    for (let i = this.order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.order[i], this.order[j]] = [this.order[j], this.order[i]];
-    }
-    this.orderIdx = 0;
-  }
-
   // --- goals -------------------------------------------------------------------------------------------------------------
 
   private goTo(x: number, z: number, label: string): boolean {
-    const p = this.nav.path(this.pos, { x, z });
+    const p = this.nav.path(this.pos, { x, z }, this.cfg.pathRound);
     if (!p || !p.length) return false;
     this.path = p;
     this.pathIdx = 0;
@@ -423,15 +314,18 @@ export class Seeker {
 
   private startPatrol(): void {
     this.state = 'patrol_walk';
-    for (let tries = 0; tries < this.host.spots.length; tries++) {
-      if (this.orderIdx >= this.order.length) this.shuffle();
-      const spot = this.host.spots[this.order[this.orderIdx++]];
-      const sp = this.standPoint(spot);
-      if (this.goTo(sp.x, sp.z, `patrol: ${spot.id}`)) {
-        this.lookAt = spot.position.clone();
+    this.chasing = false;
+    const tried = new Set<Stop>();
+    for (let tries = 0; tries < 5; tries++) {
+      const stop = this.patrol.next(this.pos.x, this.pos.z, tried);
+      tried.add(stop);
+      if (this.goTo(stop.x, stop.z, `patrol: ${stop.id}`)) {
+        this.curStop = stop;
+        this.lookAt = stop.lookAt ? new THREE.Vector3(stop.lookAt.x, 0, stop.lookAt.z) : null;
         return;
       }
     }
+    this.curStop = null;
     this.startLook('patrol_look');
   }
 
@@ -441,9 +335,15 @@ export class Seeker {
     this.lookDur = rand(...(kind === 'investigate_look' ? this.cfg.investigateLookTime : this.cfg.lookTime));
     this.lookBase = this.lookAt ? Math.atan2(this.lookAt.x - this.pos.x, this.lookAt.z - this.pos.z) : this.yaw;
     this.path = [];
+    // a corner or coverage stop is looked at all the way round; a hiding spot with a sweep either side of it
+    this.sweeping = kind === 'patrol_look' && !!this.curStop && this.curStop.kind !== 'spot';
+    if (this.sweeping) this.lookDur = this.patrol.cfg.sweepSeconds;
+    if ((kind === 'patrol_look' || kind === 'check_look') && this.curStop) this.patrol.visited(this.curStop);
   }
 
-  private startInvestigate(x: number, z: number, label: string): void {
+  private startInvestigate(x: number, z: number, label: string, trail: number | null = null): void {
+    this.curStop = null;
+    this.trailId = trail;
     if (this.goTo(x, z, label)) {
       this.state = 'investigate_walk';
       this.lookAt = new THREE.Vector3(x, 0, z);
@@ -455,8 +355,11 @@ export class Seeker {
     const near = [...this.host.spots].sort((a, b) => (a.position.x - player.x) ** 2 + (a.position.z - player.z) ** 2 - ((b.position.x - player.x) ** 2 + (b.position.z - player.z) ** 2)).slice(0, this.cfg.cheatCandidates);
     const spot = near[Math.floor(Math.random() * near.length)];
     if (!spot) return;
-    const sp = this.standPoint(spot);
+    // the patrol stop for a spot is a place the body can really get to, even when the spot itself is tucked in a pocket
+    const stop = this.patrol.stops.find((st) => st.id === `spot ${spot.id}`);
+    const sp = stop ?? this.standPoint(spot);
     if (this.goTo(sp.x, sp.z, `check: ${spot.id}`)) {
+      this.curStop = stop ?? null;
       this.state = 'check_walk';
       this.lookAt = spot.position.clone();
     }
@@ -469,6 +372,7 @@ export class Seeker {
     dt = Math.min(dt, 0.05);
     this.noiseTimer = Math.max(0, this.noiseTimer - dt);
     this.cheatTimer += dt;
+    this.patrol.tick(dt);
     this.eye.set(this.pos.x + Math.sin(this.yaw) * 0.12, cfg.eyeHeight, this.pos.z + Math.cos(this.yaw) * 0.12);
 
     if (this.state === 'caught') {
@@ -489,19 +393,35 @@ export class Seeker {
     this.sees(dt, p);
     this.hears(p);
 
+    this.tickSpin(dt);
+    this.scanPrints(dt);
+
     // suspicion thresholds
     if (this.state !== 'catch') {
       if (this.suspicion >= cfg.catchAt) {
-        this.state = 'catch';
-        this.catchT = 0;
-        this.path = [];
-        this.onCatchStart?.();
-      } else if (this.suspicion >= cfg.leanAt && this.state !== 'suspicious') {
-        this.state = 'suspicious';
-        this.path = [];
-      } else if (this.state === 'suspicious' && this.suspicion < cfg.leanExit) {
-        if (this.lastSeen) this.startInvestigate(this.lastSeen.x, this.lastSeen.z, 'investigate: last seen');
-        else this.startPatrol();
+        if (this.sense.canCatch) {
+          this.endSpin(false);
+          this.state = 'catch';
+          this.catchT = 0;
+          this.path = [];
+          this.chasing = false;
+          this.onCatchStart?.();
+        } else this.chase(dt, p); // sure it saw someone, but too far for the lunge: close in
+      } else {
+        this.chasing = false;
+        this.curiousT -= dt;
+        const calm = this.state === 'patrol_walk' || this.state === 'patrol_look' || this.state === 'check_walk' || this.state === 'check_look' || this.state === 'investigate_look';
+        if (this.suspicion >= cfg.curiousAt && this.suspicion < cfg.leanAt && calm && this.curiousT <= 0 && this.lastSeen) {
+          this.curiousT = cfg.curiousCooldown;
+          this.startInvestigate(this.lastSeen.x, this.lastSeen.z, 'curious: something moved');
+        } else if (this.suspicion >= cfg.leanAt && this.state !== 'suspicious') {
+          this.endSpin(false);
+          this.state = 'suspicious';
+          this.path = [];
+        } else if (this.state === 'suspicious' && this.suspicion < cfg.leanExit) {
+          if (this.lastSeen) this.startInvestigate(this.lastSeen.x, this.lastSeen.z, 'investigate: last seen');
+          else this.startPatrol();
+        }
       }
     }
 
@@ -510,8 +430,9 @@ export class Seeker {
       case 'investigate_walk':
       case 'check_walk': {
         this.anim = 'search_walk';
-        const speed = this.state === 'patrol_walk' ? cfg.patrolSpeed : this.state === 'investigate_walk' ? cfg.investigateSpeed : cfg.checkSpeed;
+        const speed = this.state === 'patrol_walk' ? cfg.patrolSpeed : this.state === 'investigate_walk' ? (this.chasing ? cfg.chaseSpeed : this.trailId !== null ? cfg.trailSpeed : cfg.investigateSpeed) : cfg.checkSpeed;
         if (this.follow(dt, speed)) {
+          if (this.state === 'investigate_walk' && this.trailId !== null && this.nextOnTrail()) break;
           // arrived: turn to the thing we came to look at, then look around
           const kind = this.state === 'patrol_walk' ? 'patrol_look' : this.state === 'investigate_walk' ? 'investigate_look' : 'check_look';
           this.startLook(kind);
@@ -524,8 +445,8 @@ export class Seeker {
         this.anim = 'look_around';
         this.speed += (0 - this.speed) * Math.min(1, dt * 8);
         this.lookT += dt;
-        const sweep = Math.sin(this.lookT * 1.1) * cfg.lookSweepAngle * Math.min(1, this.lookT / 0.6);
-        this.yaw += wrap(this.lookBase + sweep - this.yaw) * Math.min(1, dt * 5);
+        const sweep = this.sweeping ? (this.lookT / this.lookDur) * Math.PI * 2 : Math.sin(this.lookT * 1.1) * cfg.lookSweepAngle * Math.min(1, this.lookT / 0.6);
+        this.yaw += wrap(this.lookBase + sweep - this.yaw) * Math.min(1, dt * (this.sweeping ? 8 : 5));
         if (this.lookT >= this.lookDur) this.startPatrol();
         this.cheatTick(p);
         break;
@@ -538,22 +459,50 @@ export class Seeker {
         this.yaw += wrap(Math.atan2(t.x - this.pos.x, t.z - this.pos.z) - this.yaw) * Math.min(1, dt * 8);
         break;
       }
+      case 'spin_wind': {
+        this.anim = 'spin_wind';
+        this.speed += (0 - this.speed) * Math.min(1, dt * 10);
+        this.spinT += dt;
+        const k = Math.min(1, this.spinT / cfg.spinTelegraph);
+        this.masq.lift = k;
+        this.ringMaterial.opacity = 0.3 + 0.4 * k * (0.5 + 0.5 * Math.sin(this.spinT * 20));
+        if (this.spinT >= cfg.spinTelegraph) {
+          this.state = 'spin';
+          this.spinT = 0;
+          this.onSpinStart?.();
+        }
+        break;
+      }
+      case 'spin': {
+        this.anim = 'spin_sweep';
+        this.speed += (0 - this.speed) * Math.min(1, dt * 10);
+        this.spinT += dt;
+        this.yaw += ((Math.PI * 2) / cfg.spinSeconds) * dt;
+        this.masq.lift = 1;
+        this.ringMaterial.opacity = 0.75;
+        if (this.spinT >= cfg.spinSeconds) {
+          this.endSpin(true);
+          this.startPatrol();
+        }
+        break;
+      }
       case 'catch': {
+        // the lunge: turn to the player and step in. It does not have to touch; being seen this close is the catch.
         this.anim = 'catch_lunge';
         this.catchT += dt;
         const dx = p.position.x - this.pos.x;
         const dz = p.position.z - this.pos.z;
         const d = Math.hypot(dx, dz);
         this.yaw += wrap(Math.atan2(dx, dz) - this.yaw) * Math.min(1, dt * 14);
-        if (d > cfg.catchReach && this.catchT < cfg.catchDashMax) {
-          const step = Math.min(cfg.catchDashSpeed * dt, d - cfg.catchReach * 0.8);
-          this.pos.x += (dx / d) * step;
-          this.pos.z += (dz / d) * step;
-          this.speed = cfg.catchDashSpeed;
-        } else {
-          this.speed = 0;
-        }
-        if ((d <= cfg.catchReach || this.catchT >= cfg.catchDashMax) && this.catchT > 0.25) {
+        if (this.catchT < cfg.catchLungeSeconds && d > 1) {
+          const step = Math.min((cfg.catchLungeDistance / cfg.catchLungeSeconds) * dt, d - 1);
+          const to = { x: this.pos.x + (dx / d) * step, z: this.pos.z + (dz / d) * step };
+          resolveCollisions(to, cfg.radius - 0.05, this.host.colliders, -5);
+          this.pos.x = to.x;
+          this.pos.z = to.z;
+          this.speed = cfg.catchLungeDistance / cfg.catchLungeSeconds;
+        } else this.speed = 0;
+        if (this.catchT >= cfg.catchLungeSeconds) {
           this.state = 'caught';
           this.caughtT = 0;
           this.suspicion = 1;
@@ -565,6 +514,109 @@ export class Seeker {
         break;
     }
     this.finish(dt);
+  }
+
+  private get ringMaterial(): THREE.MeshBasicMaterial {
+    return this.ring.material as THREE.MeshBasicMaterial;
+  }
+
+  /** Counts down to the next spin sweep while it is calmly walking or looking; starts the warning when due. */
+  private tickSpin(dt: number): void {
+    if (this.state === 'spin_wind' || this.state === 'spin') return;
+    const calm = this.state === 'patrol_walk' || this.state === 'patrol_look' || this.state === 'investigate_walk' || this.state === 'investigate_look' || this.state === 'check_walk' || this.state === 'check_look';
+    if (!calm || this.suspicion >= this.cfg.leanAt) return;
+    this.spinIn -= dt;
+    if (this.spinIn > 0) return;
+    this.state = 'spin_wind';
+    this.spinT = 0;
+    this.path = [];
+    this.chasing = false;
+    this.ring.visible = true;
+    this.onSpinTelegraph?.();
+  }
+
+  /** Back to normal after a sweep (or when something interrupts it). */
+  private endSpin(notify: boolean): void {
+    const was = this.state === 'spin_wind' || this.state === 'spin';
+    this.masq.lift = 0;
+    this.ring.visible = false;
+    this.ringMaterial.opacity = 0;
+    this.spinT = 0;
+    this.spinIn = rand(...this.cfg.spinInterval);
+    if (was && notify) this.onSpinEnd?.();
+  }
+
+  /** Whether the masquerade is mid-sweep, for the HUD. */
+  get spinning(): boolean {
+    return this.state === 'spin';
+  }
+  get spinWarning(): boolean {
+    return this.state === 'spin_wind';
+  }
+
+  /** The player is inside the cone, visible, and close, but not caught: a near miss (scores points). */
+  get nearMiss(): boolean {
+    return !this.blind && !this.frustrated && this.state !== 'catch' && this.state !== 'caught' && this.sense.inCone && this.visFrac > 0 && this.sense.dist <= this.cfg.nearMissRange;
+  }
+
+  /** Looks for fresh footprints in the cone and heads for the newest one it can see. */
+  private scanPrints(dt: number): void {
+    const cfg = this.cfg;
+    this.printT -= dt;
+    if (this.printT > 0) return;
+    this.printT = 0.25;
+    const prints = this.host.prints?.list();
+    if (!prints || !prints.length) return;
+    const free = this.state === 'patrol_walk' || this.state === 'patrol_look' || this.state === 'investigate_look' || this.state === 'check_walk' || this.state === 'check_look' || (this.state === 'investigate_walk' && this.trailId === null && !this.chasing);
+    if (!free || this.suspicion >= cfg.leanAt) return;
+    const half = Math.cos(THREE.MathUtils.degToRad(cfg.visionFovDeg / 2));
+    let best: { id: number; x: number; z: number } | null = null;
+    for (const pr of prints) {
+      if (pr.age > cfg.printNoticeAge || pr.id <= this.trailSeen) continue;
+      const dx = pr.x - this.pos.x;
+      const dz = pr.z - this.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > cfg.printRange || (d > 0.3 && (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d < half)) continue;
+      if (this.host.blocked(this.eye, this.tmp.set(pr.x, 0.05, pr.z))) continue;
+      if (!best || pr.id > best.id) best = pr;
+    }
+    if (!best) return;
+    this.trailSeen = best.id;
+    this.startInvestigate(best.x, best.z, 'footprint', best.id);
+  }
+
+  /** At the end of a path on a trail: the next print along it, if there is one close by. Returns true when it set off after it. */
+  private nextOnTrail(): boolean {
+    const prints = this.host.prints?.list();
+    const from = this.trailId ?? 0;
+    const next = prints?.find((pr) => pr.id > from && pr.age <= this.cfg.printNoticeAge + 2 && Math.hypot(pr.x - this.pos.x, pr.z - this.pos.z) <= this.cfg.printStep);
+    if (!next) {
+      this.trailId = null;
+      return false;
+    }
+    this.trailSeen = Math.max(this.trailSeen, next.id);
+    this.startInvestigate(next.x, next.z, 'footprint trail', next.id);
+    return true;
+  }
+
+  /** Suspicion is full but the player is beyond lunge range: run at where they are (or were last seen) until close enough. */
+  private chase(dt: number, p: PlayerSense): void {
+    this.chasing = true;
+    this.chaseT -= dt;
+    if (this.state === 'investigate_walk' && this.chaseT > 0) return;
+    this.chaseT = this.cfg.chaseRetarget;
+    const t = this.visFrac > 0 ? p.position : (this.lastSeen ?? p.position);
+    this.startInvestigate(t.x, t.z, 'chase');
+  }
+
+  /** Whether a standing player at this point is in the cone and in clear sight right now (no suspicion side effects; for tests and the overlay). */
+  canSee(x: number, z: number, maxDistance = this.cfg.visionRange): boolean {
+    const dx = x - this.pos.x;
+    const dz = z - this.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > maxDistance) return false;
+    if (d > 0.2 && (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d < Math.cos(THREE.MathUtils.degToRad(this.cfg.visionFovDeg / 2))) return false;
+    return this.cfg.sampleHeights.stand.some((h) => !this.host.blocked(this.eye, this.tmp.set(x, h, z)));
   }
 
   private cheatTick(p: PlayerSense): void {
@@ -599,7 +651,7 @@ export class Seeker {
     const dx = p.position.x - this.pos.x;
     const dz = p.position.z - this.pos.z;
     const d = Math.hypot(dx, dz);
-    const inCone = d <= cfg.visionRange && (d < 0.2 || (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d >= Math.cos(THREE.MathUtils.degToRad(cfg.visionFovDeg / 2)));
+    const inCone = this.state === 'spin' ? d <= cfg.spinRadius : d <= cfg.visionRange && (d < 0.2 || (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d >= Math.cos(THREE.MathUtils.degToRad(cfg.visionFovDeg / 2)));
 
     this.losT += dt;
     if (inCone) {
@@ -617,7 +669,7 @@ export class Seeker {
     if (d < cfg.nearRadius) distFactor *= cfg.nearBoost;
     const visible = inCone && this.visFrac > 0;
     const rate = visible ? cfg.rateMax * exposure * distFactor * this.visFrac : 0;
-    this.sense = { ...this.sense, inCone, rate, exposure, distFactor, dist: d };
+    this.sense = { ...this.sense, inCone, rate, exposure, distFactor, dist: d, canCatch: visible && d <= cfg.catchRange };
 
     if (visible) {
       this.lastSeen = (this.lastSeen ?? new THREE.Vector3()).copy(p.position);
@@ -663,13 +715,19 @@ export class Seeker {
     this.pos.x = p.x;
     this.pos.z = p.z;
 
-    // stuck? re-plan, and give up on the goal if that doesn't help
+    // stuck? re-plan; stuck again, or no way there at all: give the goal up and snooze that stop so it is not picked again straight away
     this.stuckT += dt;
     if (this.stuckT > 1.5) {
       if (Math.hypot(this.pos.x - this.stuckFrom.x, this.pos.z - this.stuckFrom.y) < 0.4) {
+        this.stuckFails++;
         const t = this.targetPoint;
-        if (!t || !this.goTo(t.x, t.z, this.targetLabel)) return true;
-      }
+        if (this.stuckFails >= 2 || !t || !this.goTo(t.x, t.z, this.targetLabel)) {
+          this.stuckFails = 0;
+          if (this.curStop) this.patrol.snooze(this.curStop);
+          if (this.state === 'patrol_walk' || this.state === 'check_walk') this.startPatrol();
+          return this.state !== 'patrol_walk' && this.state !== 'check_walk';
+        }
+      } else this.stuckFails = 0;
       this.stuckT = 0;
       this.stuckFrom.set(this.pos.x, this.pos.z);
     }

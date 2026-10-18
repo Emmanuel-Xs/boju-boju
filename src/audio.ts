@@ -10,8 +10,9 @@ export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
 export const HORN_CLIPS = ['sfx_horn_motorbike_01', 'sfx_horn_motorbike_02'] as const;
 export const STEP_NAMES = (['concrete', 'sand'] as const).flatMap((s) => [1, 2, 3, 4, 5].map((i) => `sfx_step_${s}_0${i}` as const));
 export const UI_CLIPS = ['sfx_ui_click_01', 'sfx_ui_click_02', 'sfx_ui_confirm_01', 'sfx_ui_back_01'] as const;
+export const DRUM_CLIPS = ['drum_hit_01', 'drum_hit_02', 'drum_hit_03'] as const;
 export const LAND_CLIPS = ['sfx_hit_soft_01', 'sfx_hit_soft_02'] as const;
-export const SFX_CLIPS = [...HORN_CLIPS, ...LAND_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS] as const;
+export const SFX_CLIPS = [...HORN_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS] as const;
 export type ClipName =
   | (typeof CHANT_CLIPS)[number]
   | (typeof MUSIC_CLIPS)[number]
@@ -34,7 +35,7 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   sfx_paint: 'sfx',
   jingle_win: 'sfx',
   jingle_caught: 'sfx',
-  ...(Object.fromEntries([...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS].map((n) => [n, 'sfx'])) as Record<(typeof STEP_NAMES)[number] | (typeof UI_CLIPS)[number] | (typeof LAND_CLIPS)[number], Channel>),
+  ...(Object.fromEntries([...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS].map((n) => [n, 'sfx'])) as Record<(typeof STEP_NAMES)[number] | (typeof UI_CLIPS)[number] | (typeof LAND_CLIPS)[number] | (typeof DRUM_CLIPS)[number], Channel>),
 };
 
 /** Clips that always sound far away unless the caller says `distant: false`. */
@@ -539,6 +540,7 @@ class AudioManager {
 
   stopAll(fade = 0): void {
     this.cancelChant();
+    this.cancelDrumRoll();
     this.setSuspicion(0);
     for (const v of [...this.voices]) v.voice.stop(fade);
   }
@@ -581,6 +583,29 @@ class AudioManager {
   /** Where the mix stands right now (for tests): each channel's duck multiplier. */
   mixSnapshot(): Record<Channel, number> {
     return Object.fromEntries(CHANNELS.map((ch) => [ch, this.duckGain[ch] ? +this.duckGain[ch].gain.value.toFixed(3) : 1])) as Record<Channel, number>;
+  }
+
+  // --- drum roll: the warning before the masquerade's spin sweep
+
+  private rollTimers: number[] = [];
+
+  /** Hits that speed up and swell over `seconds`, ending on one big hit. */
+  drumRoll(seconds: number): void {
+    this.cancelDrumRoll();
+    const hits = 12;
+    // hit i lands at seconds * (i / hits) ^ 0.7, so they bunch up towards the end
+    for (let i = 0; i < hits; i++) {
+      const at = seconds * (i / hits) ** 0.7 * 0.92;
+      const volume = 0.22 + 0.5 * (i / hits);
+      const clip = DRUM_CLIPS[1 + (i % 2)];
+      this.rollTimers.push(window.setTimeout(() => void this.playOnce(clip, { volume, rate: 1.1 + 0.2 * (i / hits) }), at * 1000));
+    }
+    this.rollTimers.push(window.setTimeout(() => void this.playOnce('drum_hit_01', { volume: 0.95 }), seconds * 1000));
+  }
+
+  cancelDrumRoll(): void {
+    for (const t of this.rollTimers) window.clearTimeout(t);
+    this.rollTimers = [];
   }
 
   // --- chant sequencer

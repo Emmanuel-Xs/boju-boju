@@ -16,6 +16,8 @@ export interface RoundHud {
   update(s: RoundHudState): void;
   show(visible: boolean): void;
   banner(text: string | null, color?: string): void;
+  /** A short message that floats up and fades: score awards, the run-home hint, the spin warning. */
+  popup(text: string, color?: string, seconds?: number): void;
   onReady: (() => void) | null;
 }
 
@@ -66,6 +68,13 @@ export function createRoundHud(): RoundHud {
   layout();
   addEventListener('resize', layout);
 
+  const pops = document.createElement('div');
+  root.appendChild(pops);
+  const placePops = () =>
+    css(pops, narrow() ? 'position:absolute;right:8px;top:118px;width:196px;display:flex;flex-direction:column;align-items:flex-end;gap:4px' : 'position:absolute;left:50%;top:112px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px');
+  placePops();
+  addEventListener('resize', placePops);
+
   const banner = document.createElement('div');
   css(banner, 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:800 clamp(34px,8vw,64px) system-ui;letter-spacing:4px;text-shadow:0 4px 18px #000;text-align:center;padding:0 12px');
   root.appendChild(banner);
@@ -79,6 +88,15 @@ export function createRoundHud(): RoundHud {
       banner.style.display = text ? 'flex' : 'none';
       banner.style.background = color;
       banner.textContent = text ?? '';
+    },
+    popup(text, color = '#d8fd71', seconds = 1.8) {
+      while (pops.children.length >= 5) pops.firstElementChild?.remove();
+      const el = document.createElement('div');
+      css(el, `font:800 ${narrow() ? 15 : 18}px system-ui;color:${color};text-shadow:0 2px 6px #000;background:#000a;border-radius:999px;padding:3px 12px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis`);
+      el.textContent = text;
+      pops.appendChild(el);
+      const a = el.animate([{ opacity: 0, transform: 'translateY(8px) scale(.9)' }, { opacity: 1, transform: 'translateY(0) scale(1)', offset: 0.12 }, { opacity: 1, offset: 0.75 }, { opacity: 0, transform: 'translateY(-14px)' }], { duration: seconds * 1000, easing: 'ease-out' });
+      a.onfinish = () => el.remove();
     },
     update(s) {
       const sec = Math.max(0, Math.ceil(s.seconds));

@@ -4,6 +4,10 @@
 import * as THREE from 'three';
 import { audio, HORN_CLIPS, LAND_CLIPS, STEP_NAMES, UI_CLIPS } from './audio';
 import { Stepper } from './footsteps';
+import { Coverage } from './levels/coverage';
+import { Footprints } from './levels/footprints';
+import { createGateMarker } from './levels/gate';
+import { onDirt } from './levels/ground';
 import { mountAudioDebug } from './audioDebug';
 import { createCharacter, type Character, type PlayerState } from './character';
 import { Fx, applyPixelRatio } from './fx';
@@ -15,8 +19,8 @@ import { HidingController } from './levels/hiding';
 import { createLyrics } from './levels/lyrics';
 import { createRoundHud } from './levels/roundHud';
 import { TopDownCamera } from './levels/topdown';
-import { difficultyFor, newStats, RUN_CONFIG, verdictFor, type RunStats } from './run';
-import { Seeker } from './seeker';
+import { difficultyFor, award, newStats, RUN_CONFIG, verdictFor, type RunStats } from './run';
+import { Seeker, SEEKER_CONFIG } from './seeker';
 import { canTalkToStartNg, localNet, type BestRun, type Net } from './startng';
 import { AutoQuality, TIER_NAMES } from './quality';
 import { Screens, type BoardEntry } from './ui';
@@ -140,12 +144,15 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (tier >= 3) fx.dust.pool.points.visible = false;
   });
   const chickens = new Chickens(level.colliders);
+  const prints = new Footprints(scene);
+  const gateMarker = createGateMarker(level.gate);
+  scene.add(gateMarker.group);
   scene.add(chickens.group);
   let seeker: Seeker | null = null;
   const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: coarse || dev('buttons'), hunt: false, eye: () => seeker?.eye ?? null });
   if (!DEV || q.get('seeker') !== '0') {
     seeker = new Seeker(
-      { colliders: level.colliders, bounds: level.bounds, spots: level.hidingSpots.map((s) => ({ id: s.id, position: s.position, facing: s.facing })), blocked: (a, b) => hiding.probe.blocked(a, b) },
+      { colliders: level.colliders, bounds: level.bounds, spots: level.hidingSpots.map((s) => ({ id: s.id, position: s.position, facing: s.facing })), blocked: (a, b) => hiding.probe.blocked(a, b), prints },
       fx,
       scene,
     );
@@ -193,6 +200,13 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   // --- the run
   const roundHud = createRoundHud();
   const lyrics = createLyrics();
+  if (seeker) {
+    // the spin sweep is announced a second early: a drum roll, the panels lifting, and a warning on screen
+    seeker.onSpinTelegraph = () => {
+      audio.drumRoll(SEEKER_CONFIG.spinTelegraph);
+      roundHud.popup('SPIN SWEEP! Get out of the ring!', '#ffb347', 1.6);
+    };
+  }
   const cfg = { ...RUN_CONFIG, prepSeconds: DEV ? Number(q.get('prep') ?? RUN_CONFIG.prepSeconds) : RUN_CONFIG.prepSeconds, huntSeconds: DEV ? Number(q.get('hunt_s') ?? RUN_CONFIG.huntSeconds) : RUN_CONFIG.huntSeconds };
   let mode: Mode = 'lobby';
   let paused = false;
@@ -266,6 +280,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     hiding.show(false);
     screens.setCard(null);
     restoreLook();
+    prints.clear();
+    audio.cancelDrumRoll();
     body.vx = body.vz = body.vy = 0;
     pos.copy(spawn);
     if (seeker) {
@@ -308,6 +324,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     runStats = newStats();
     lastScore = '';
     savedBest = false;
+    seeker?.patrol.reset();
     screens.hideAll();
     startRound();
   }
@@ -354,7 +371,11 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   /** The hider is ready: the chant opens and the hunt follows. `early` earns the bonus. */
   function requestReady(early: boolean) {
     if (mode !== 'prep' || readyWatch >= 0) return;
-    if (early) runStats.points += Math.floor(prepLeft) * cfg.readyBonusPerSecond;
+    if (early) {
+      const bonus = Math.floor(prepLeft) * cfg.readyBonusPerSecond;
+      award(runStats, 'ready', bonus);
+      if (bonus > 0) roundHud.popup(`+${bonus} Ready early`, '#d8fd71');
+    }
     readyWatch = cfg.chantTimeoutSeconds;
     if (audio.unlocked && audio.chantState !== 'idle') audio.chantReady();
     else readyWatch = 0.5;
@@ -366,6 +387,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     quality.begin();
     huntLeft = cfg.huntSeconds;
     readyWatch = -1;
+    roundCamoSum = roundCamoTime = 0;
+    pending.survival = pending.nearMiss = since.survival = since.nearMiss = 0;
+    runHomeWasOpen = false;
     player.setHuntMode(true);
     screens.setCard(identity);
     hiding.setPaletteTop(72);
@@ -375,20 +399,52 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     }
   }
 
-  function clearRound() {
+  // score popups: per-second points are grouped so the screen is not a blur of numbers
+  const pending = { survival: 0, nearMiss: 0 };
+  const since = { survival: 0, nearMiss: 0 };
+  let roundCamoSum = 0;
+  let roundCamoTime = 0;
+  function flushPopups(all = false) {
+    const every = cfg.score.popupEvery;
+    if (pending.survival >= 1 && (all || since.survival >= every.survival)) {
+      roundHud.popup(`+${Math.round(pending.survival)} Survival`, '#d8fd71');
+      pending.survival = since.survival = 0;
+    }
+    if (pending.nearMiss >= 1 && (all || since.nearMiss >= every.nearMiss || !seeker?.nearMiss)) {
+      roundHud.popup(`+${Math.round(pending.nearMiss)} NEAR MISS!`, '#ffb347');
+      pending.nearMiss = since.nearMiss = 0;
+    }
+  }
+
+  function clearRound(ranHome = false) {
     mode = 'cleared';
     quality.stop();
     clearedLeft = cfg.clearedSeconds;
     hopT = 0;
     runStats.rounds++;
-    runStats.points += cfg.clearPoints;
+    const avgCamo = roundCamoTime > 0 ? roundCamoSum / roundCamoTime : 0;
+    const camoBonus = Math.round(avgCamo * cfg.score.camoBonusPerPoint);
+    award(runStats, 'camo', camoBonus);
+    flushPopups(true);
+    if (camoBonus > 0) roundHud.popup(`+${camoBonus} Camo bonus (${Math.round(avgCamo)}% average)`, '#7fd6ff', 2.4);
     saveProgress(); // a cleared round counts even if the player never gets caught or closes the tab
-    roundHud.banner(`ROUND ${round} CLEARED!`, '#1c7a3a55');
+    roundHud.banner(ranHome ? 'YOU MADE IT HOME!' : `ROUND ${round} CLEARED!`, '#1c7a3a55');
     fx.caughtBurst(new THREE.Vector3(pos.x, pos.y + 1.4, pos.z), G.celebrateColors, 90);
     void audio.playOnce('jingle_win', { volume: 0.5 });
     audio.setSuspicion(0);
+    audio.cancelDrumRoll();
     if (seeker) seeker.frustrated = true;
     hiding.clearPose();
+  }
+
+  /** The gate is a choice: once the masquerade is far from it, touching it ends the round with a big bonus. */
+  function runHome() {
+    if (mode !== 'hunt') return;
+    const bonus = cfg.score.runHomeBonus + Math.floor(huntLeft) * cfg.score.runHomeBonusPerSecondLeft;
+    award(runStats, 'runHome', bonus);
+    runStats.ranHome++;
+    roundHud.popup(`RUN HOME!  +${bonus}`, '#6dff9a', 2.8);
+    clearRound(true);
   }
 
   /** Sends the run so far. The board keeps each player's best run, so saving after every cleared round is safe. */
@@ -407,6 +463,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (mode !== 'hunt') return;
     mode = 'dying';
     quality.stop();
+    audio.cancelDrumRoll();
     dyingLeft = cfg.slowMoSeconds;
     timeScale = cfg.slowMoScale;
     caughtDone = false;
@@ -432,7 +489,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     restoreLook(); // the full look comes back
     runStats.hiddenSeconds = Math.round(runStats.hiddenSeconds);
     runStats.bestCamo = Math.round(runStats.bestCamo);
-    runStats.points = Math.round(runStats.points);
+    for (const k of Object.keys(runStats.parts) as (keyof typeof runStats.parts)[]) runStats.parts[k] = Math.round(runStats.parts[k]);
+    runStats.score = Object.values(runStats.parts).reduce((a, b) => a + b, 0);
+    audio.cancelDrumRoll();
     const verdict = verdictFor(runStats);
     void audio.playOnce('jingle_caught', { volume: 0.75 });
     void (async () => {
@@ -521,7 +580,20 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   player.play('idle', 0.01);
   let yaw = 0;
   let wasGrounded = true;
-  const playerSteps = new Stepper('player');
+  /** Tests can pin the camo score the masquerade sees (null = the real one). */
+  let debugCamo: number | null = null;
+  let runHomeWasOpen = false;
+  let hintSeen = (() => {
+    try {
+      return localStorage.getItem('boju.runHomeHint') === '1';
+    } catch {
+      return false;
+    }
+  })();
+  // running on bare dirt leaves prints (walking leaves none); the masquerade can follow them
+  const playerSteps = new Stepper('player', (x, z, run) => {
+    if (run && onDirt(x, z)) prints.add(x, z, yaw);
+  });
   const seekerSteps = new Stepper('seeker');
   let seekerLastX = 0;
   let seekerLastZ = 0;
@@ -591,7 +663,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     if (seeker) {
       sense.speed = moving ? res.speed : 0;
       sense.landed = landed;
-      sense.camo = hiding.camo.breakdown.total;
+      sense.camo = DEV && debugCamo !== null ? debugCamo : hiding.camo.breakdown.total;
       sense.pose = hiding.pose;
       seeker.update(dt, sense);
       if (dt > 0) seekerSteps.advance(dt, seeker.position.x, seeker.position.z, Math.hypot(seeker.position.x - seekerLastX, seeker.position.z - seekerLastZ) / dt);
@@ -599,6 +671,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       seekerLastZ = seeker.position.z;
     }
     chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])]);
+    prints.update(dt);
 
     // flow
     if (mode === 'prep') {
@@ -617,9 +690,34 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     } else if (mode === 'hunt') {
       huntLeft -= dt;
       runStats.hiddenSeconds += dt;
-      runStats.points += dt * cfg.hiddenPointsPerSecond;
-      runStats.bestCamo = Math.max(runStats.bestCamo, hiding.camo.breakdown.total);
-      if (huntLeft <= 0) clearRound();
+      const camoNow = DEV && debugCamo !== null ? debugCamo : hiding.camo.breakdown.total;
+      runStats.bestCamo = Math.max(runStats.bestCamo, camoNow);
+      roundCamoSum += camoNow * dt;
+      roundCamoTime += dt;
+      const sc = cfg.score;
+      award(runStats, 'survival', dt * sc.survivalPerSecond);
+      pending.survival += dt * sc.survivalPerSecond;
+      since.survival += dt;
+      if (seeker?.nearMiss) {
+        award(runStats, 'nearMiss', dt * sc.nearMissPerSecond);
+        pending.nearMiss += dt * sc.nearMissPerSecond;
+        since.nearMiss += dt;
+      }
+      flushPopups();
+      // the way home
+      const open = !!seeker && !seeker.blind && Math.hypot(seeker.position.x - level.gate.x, seeker.position.z - level.gate.z) > cfg.runHome.seekerDistance;
+      if (open && !runHomeWasOpen && !hintSeen) {
+        hintSeen = true;
+        try {
+          localStorage.setItem('boju.runHomeHint', '1');
+        } catch {
+          /* private mode: it just shows again next time */
+        }
+        roundHud.popup('Run home! The gate is open: touch it now to end the round.', '#6dff9a', 5);
+      }
+      runHomeWasOpen = open;
+      if (open && pos.x >= cfg.runHome.reachX && Math.abs(pos.z - level.gate.z) <= level.gate.halfWidth) runHome();
+      else if (huntLeft <= 0) clearRound();
     } else if (mode === 'cleared') {
       clearedLeft -= dt;
       if (clearedLeft <= 0) {
@@ -631,6 +729,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   }
 
   /** One whole-game step: real time `rawDt` in, the world advanced by the (possibly slowed) game time. */
+  let gateTime = 0;
   function tick(rawDt: number) {
     if (paused) return;
     const dt = Math.min(0.05, rawDt);
@@ -647,6 +746,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       }
     }
     simulate(dt * timeScale);
+    gateTime += dt;
+    gateMarker.update(gateTime, runHomeWasOpen && mode === 'hunt', mode === 'prep' || mode === 'hunt');
     if (mode !== 'lobby' && mode !== 'results') {
       roundHud.update({
         label: labelFor(),
@@ -655,10 +756,13 @@ export async function startGame(net: Net = localNet()): Promise<void> {
         ready: mode === 'prep' && readyWatch < 0 ? { bonus: Math.floor(prepLeft) * cfg.readyBonusPerSecond } : null,
         hiders: 1,
         caught: mode === 'dying' ? 1 : 0,
-        points: Math.round(runStats.points),
+        points: Math.round(runStats.score),
       });
     }
   }
+
+  // DEV only: ?zones draws the dead-zone heat map over the floor
+  if (DEV && q.has('zones') && seeker) void import('./levels/zonesOverlay').then((m) => m.showZonesOverlay(scene, level, seeker!));
 
   // --- start in the lobby (the board loads in the background: the game never waits for start.ng)
   loading.remove();
@@ -727,6 +831,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       level,
       fx,
       lyrics,
+      prints,
+      gateMarker,
       get player() {
         return player;
       },
@@ -753,6 +859,35 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       },
       pos,
       screens,
+      setCamo(v: number | null) {
+        debugCamo = v;
+      },
+      /** The walkable floor as text: # blocked for everyone, p only the player fits, . both fit. */
+      ascii() {
+        const cov = new Coverage(level.colliders, level.bounds);
+        const rows: string[] = [];
+        for (let iz = 0; iz < cov.player.h; iz++) {
+          let row = `${(level.bounds.minZ + (iz + 0.5) * 0.5).toFixed(1).padStart(6)} `;
+          for (let ix = 0; ix < cov.player.w; ix++) row += cov.player.isBlockedCell(ix, iz) ? '#' : cov.seeker.isBlockedCell(ix, iz) ? 'p' : '.';
+          rows.push(row);
+        }
+        return rows.join('\n');
+      },
+      /** Where the masquerade can and cannot see (see levels/coverage.ts). */
+      coverage() {
+        const t0 = performance.now();
+        const cov = new Coverage(level.colliders, level.bounds);
+        const counts = cov.viewCounts();
+        const r = (z: { cx: number; cz: number; area: number; minX: number; maxX: number; minZ: number; maxZ: number }) => ({ at: [+z.cx.toFixed(1), +z.cz.toFixed(1)], area: z.area, x: [z.minX, z.maxX], z: [z.minZ, z.maxZ] });
+        return {
+          ms: Math.round(performance.now() - t0),
+          cells: cov.cells.length,
+          viewpoints: cov.viewpoints.length,
+          dead: cov.deadZones(counts).map(r),
+          thin: cov.thinZones(counts).slice(0, 25).map(r),
+          corners: cov.corners().map((c) => [c.x, c.z, counts[c.cell]]),
+        };
+      },
       /** Runs the whole game logic (flow, player, camo, seeker, chickens) in fixed steps, ignoring the frame rate. Returns the seconds it ran. */
       sim(seconds: number, until?: () => boolean) {
         let t = 0;

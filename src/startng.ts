@@ -8,8 +8,8 @@ import type { RunStats } from './run';
 import type { BoardEntry } from './ui';
 
 export interface BestRun {
+  score: number;
   rounds: number;
-  hidden: number;
   camo: number;
 }
 
@@ -130,7 +130,7 @@ function boardFrom(entries: unknown): BoardEntry[] | null {
       player_id: typeof r.player_id === 'number' ? r.player_id : -1,
       name: text(r.name, 'Player'),
       score: whole(r.score),
-      stats: { rounds: whole(stats.rounds ?? r.score), hidden: whole(stats.hidden), camo: whole(stats.camo) },
+      stats: { score: whole(stats.score ?? r.score), rounds: whole(stats.rounds), camo: whole(stats.camo) },
     });
   }
   return out;
@@ -143,7 +143,7 @@ const BEST_KEY = 'boju.best';
 export function readLocalBest(who: number | null = null): BestRun | null {
   try {
     const v = JSON.parse(localStorage.getItem(`${BEST_KEY}${who === null ? '' : `.${who}`}`) ?? 'null');
-    return v && typeof v.rounds === 'number' ? v : null;
+    return v && typeof v.score === 'number' && typeof v.rounds === 'number' ? v : null;
   } catch {
     return null;
   }
@@ -157,11 +157,11 @@ function writeLocalBest(run: BestRun, who: number | null = null): void {
   }
 }
 
-const isBetter = (run: BestRun, prev: BestRun | null) => !prev || run.rounds > prev.rounds || (run.rounds === prev.rounds && run.hidden > prev.hidden) || (run.rounds === prev.rounds && run.hidden === prev.hidden && run.camo > prev.camo);
+const isBetter = (run: BestRun, prev: BestRun | null) => !prev || run.score > prev.score || (run.score === prev.score && run.rounds > prev.rounds) || (run.score === prev.score && run.rounds === prev.rounds && run.camo > prev.camo);
 
 /** The three numbers the leaderboard takes (see startng.json): whole numbers, in this order of importance. */
-export function statsFor(s: RunStats): { rounds: number; hidden: number; camo: number } {
-  return { rounds: whole(s.rounds), hidden: whole(s.hiddenSeconds), camo: whole(s.bestCamo) };
+export function statsFor(s: RunStats): { score: number; rounds: number; camo: number } {
+  return { score: whole(s.score), rounds: whole(s.rounds), camo: whole(s.bestCamo) };
 }
 
 // --- the nets ------------------------------------------------------------------------------------------------------------------
@@ -221,7 +221,7 @@ export function startNgNet(): Net {
     async best() {
       if (me?.signedIn && me.id !== null) {
         const row = cachedBoard?.find((e) => e.player_id === me!.id);
-        if (row) return { rounds: row.stats.rounds, hidden: row.stats.hidden, camo: row.stats.camo };
+        if (row) return { score: row.stats.score, rounds: row.stats.rounds, camo: row.stats.camo };
         return readLocalBest(me.id);
       }
       return readLocalBest();
@@ -237,14 +237,14 @@ export function startNgNet(): Net {
       if (!reply) return { saved: false, improved: false, rank: null, message: "start.ng didn't answer, so this run wasn't saved." };
       if (!reply.ok || !reply.result) return { saved: false, improved: false, rank: null, message: reply.error ? `Not saved: ${String(reply.error).slice(0, 80)}` : 'Not saved.' };
       const r = reply.result;
-      const best = r.stats ? { rounds: whole(r.stats.rounds), hidden: whole(r.stats.hidden), camo: whole(r.stats.camo) } : run;
+      const best = r.stats ? { score: whole(r.stats.score), rounds: whole(r.stats.rounds), camo: whole(r.stats.camo) } : run;
       writeLocalBest(best, me.id);
       const rank = typeof r.rank === 'number' ? r.rank : null;
       return {
         saved: true,
         improved: !!r.improved,
         rank,
-        message: r.improved ? `New best! You are #${rank ?? '?'} on the board.` : `Not your best this time. You are #${rank ?? '?'} with ${best.rounds} round${best.rounds === 1 ? '' : 's'}.`,
+        message: r.improved ? `New best! You are #${rank ?? '?'} on the board.` : `Not your best this time. You are #${rank ?? '?'} with ${best.score} points.`,
       };
     },
     signInUrl: () => `${REAL_START_NG}/?return_to=${encodeURIComponent(location.origin + location.pathname)}`,

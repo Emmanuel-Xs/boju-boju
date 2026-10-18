@@ -55,6 +55,8 @@ export interface Compound {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   spawn: THREE.Vector3;
   generator: THREE.Vector3;
+  /** The gate in the east fence: the way home. Its middle at floor level, and half the width of the opening. */
+  gate: { x: number; z: number; halfWidth: number };
   baseColorAt(point: THREE.Vector3): THREE.Color | null;
   setMarkersVisible(visible: boolean): void;
 }
@@ -355,9 +357,10 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
     chair(x, 0, z, ry);
     colliders.push(circle(x, z, 0.27));
   }
-  for (let i = 0; i < 5; i++) chair(9.3 + (i % 2) * 0.02, i * 0.13, 6.5, 0.4 + i * 0.05);
-  colliders.push(circle(9.3, 6.5, 0.34));
-  surf('chairs_stack', 'Stacked white plastic chairs', 'chairs', [9.3, 0.6, 6.5], [0.7, 1.2, 0.7], [0, 0, 1], props.baseOf('#f2f2ee'));
+  // (stacked by the south wall, not in the middle of the lane: out in the lane they plugged the way into the slot beside the steps)
+  for (let i = 0; i < 5; i++) chair(9.3 + (i % 2) * 0.02, i * 0.13, 8.4, 0.4 + i * 0.05);
+  colliders.push(circle(9.3, 8.4, 0.34));
+  surf('chairs_stack', 'Stacked white plastic chairs', 'chairs', [9.3, 0.6, 8.4], [0.7, 1.2, 0.7], [0, 0, 1], props.baseOf('#f2f2ee'));
   surf('chairs_north', 'White plastic chairs', 'chairs', [-3.97, 0.5, -8.1], [1.2, 1, 0.6], [0, 0, 1], props.baseOf('#f2f2ee'));
 
   // generator on a concrete plinth, red with a darker tank
@@ -610,7 +613,9 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
   const body = van.find((p) => p.name === 'body')!;
   const wheels = van.filter((p) => p.name.startsWith('wheel'));
   const danfoGroup = new THREE.Group();
-  danfoGroup.position.set(11.2, 0, 4.4);
+  // parked 0.55 m further west than it looks natural, so the lane between its east end and the fence is wide enough for the masquerade to walk through
+  // (otherwise the alley behind it was a dead end the seeker could only look into from one side)
+  danfoGroup.position.set(10.65, 0, 4.4);
   danfoGroup.rotation.y = Math.PI / 2;
   danfoGroup.scale.set(1.35, 1.7, 1.7);
   const bodyMesh = new THREE.Mesh(body.geometry, danfoMaterial(body.material.map));
@@ -625,8 +630,8 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
   wheelMesh.userData.baseColor = wheels[0].baseColor.clone();
   danfoGroup.add(bodyMesh, wheelMesh);
   group.add(danfoGroup);
-  colliders.push(box(8.85, 3.35, 13.55, 5.45, true));
-  surf('danfo', 'Danfo (yellow, black stripes)', 'vehicle', [11.2, 1.0, 4.4], [4.7, 2.1, 2.0], [0, 0, -1], new THREE.Color(DANFO_YELLOW));
+  colliders.push(box(8.3, 3.35, 13.0, 5.45, true));
+  surf('danfo', 'Danfo (yellow, black stripes)', 'vehicle', [10.65, 1.0, 4.4], [4.7, 2.1, 2.0], [0, 0, -1], new THREE.Color(DANFO_YELLOW));
 
   // ---------------------------------------------------------------- hiding spots (every one reads its colour from the registry)
   const V = (x: number, z: number) => new THREE.Vector3(x, 0, z);
@@ -639,10 +644,10 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
     { id: 'doorway_north', label: 'Red doorway recess (north row)', shape: 'recess', at: V(-2.5, zAtNorth(0.45)), facing: dir(0, -1), reach: 0.4 },
     { id: 'doorway_south', label: 'Yellow doorway recess (south row)', shape: 'recess', at: V(-7.5, 9 + 0.45), facing: dir(0, 1), reach: 0.4 },
     { id: 'clothesline', label: 'Under the clothes line', shape: 'hanging cloth, multicolour', at: V(-7.5, 0.35), facing: dir(0, 1) },
-    { id: 'danfo', label: 'Beside the danfo', shape: 'long vehicle', at: V(11.2, 2.95), facing: dir(0, 1) },
+    { id: 'danfo', label: 'Beside the danfo', shape: 'long vehicle', at: V(10.65, 2.95), facing: dir(0, 1) },
     { id: 'zinc_fence', label: 'Against the zinc fence', shape: 'corrugated fence', at: V(14.3, 6.2), facing: dir(1, 0) },
     { id: 'generator', label: 'Behind the generator', shape: 'box block', at: V(-14.2, 4.6), facing: dir(1, 0) },
-    { id: 'chairs_stack', label: 'Stacked white chairs', shape: 'tall stack', at: V(9.3, 5.75), facing: dir(0, 1) },
+    { id: 'chairs_stack', label: 'Stacked white chairs', shape: 'tall stack', at: V(9.3, 7.65), facing: dir(0, 1) },
     { id: 'bush_east', label: 'Bush in the east corner', shape: 'foliage', at: V(12.75, -5.4), facing: dir(1, 0) },
     { id: 'bench', label: 'Wooden bench on the south veranda', shape: 'low bench', at: V(-4.5, 7.6), facing: dir(0, 1) },
     { id: 'sheets', label: 'Rusty zinc sheets leaning on the wall', shape: 'leaning slabs', at: V(0, 7.9), facing: dir(0, 1) },
@@ -697,9 +702,10 @@ export async function createCompound(onAsset?: () => void): Promise<Compound> {
     surfaces,
     hidingSpots,
     fadeGroups,
-    bounds: { minX: -HALF + 0.3, maxX: 19.5, minZ: -14.6, maxZ: 14.6 },
+    bounds: { minX: -HALF + 0.3, maxX: 14.75, minZ: -9.6, maxZ: 9.6 }, // the yard only: the gate is the way home, not a way out
     spawn: new THREE.Vector3(0.5, 0, 0.5),
     generator: generatorPos,
+    gate: { x: 14.6, z: 0, halfWidth: 2.6 },
     baseColorAt: (p) => surfaces.baseColorAt(p),
     setMarkersVisible: (v) => (markers.visible = v),
   };

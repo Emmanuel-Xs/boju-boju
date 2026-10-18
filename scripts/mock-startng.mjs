@@ -10,9 +10,9 @@ const state = {
   user: { id: 42, name: 'Runner Tee', account: 'Hamzat', style: { body: 'female', primaryColor: '#a55eea', secondaryColor: '#0c6e5a', skinColor: '#8d5524', hairColor: '#17120f', hair: 'braids', hat: 'crown', accessory: 'earrings' }, face },
   guest: { name: 'Guest', style: { body: 'male', primaryColor: '#3b82f6', secondaryColor: '#374151', skinColor: '#c68642', hairColor: '#2b1b12', hair: 'short', hat: 'none', accessory: 'none' }, face },
   board: [
-    { rank: 1, player_id: 7, name: 'Trini', color: '#4b7bec', score: 8, stats: { rounds: 8, hidden: 612, camo: 97 } },
-    { rank: 2, player_id: 42, name: 'Runner Tee', color: '#a55eea', score: 5, stats: { rounds: 5, hidden: 401, camo: 94 } },
-    { rank: 3, player_id: 9, name: 'Ada', color: '#26de81', score: 3, stats: { rounds: 3, hidden: 188, camo: 81 } },
+    { rank: 1, player_id: 7, name: 'Trini', color: '#4b7bec', score: 2210, stats: { score: 2210, rounds: 8, camo: 97 } },
+    { rank: 2, player_id: 42, name: 'Runner Tee', color: '#a55eea', score: 1405, stats: { score: 1405, rounds: 5, camo: 94 } },
+    { rank: 3, player_id: 9, name: 'Ada', color: '#26de81', score: 640, stats: { score: 640, rounds: 3, camo: 81 } },
   ],
   saved: [],
   scoreError: null,
@@ -46,19 +46,19 @@ const server = createServer((req, res) => {
     if (url.pathname === '/__state') return json(state);
     if (url.pathname === '/__score') {
       const s = JSON.parse(raw);
-      for (const k of ['rounds', 'hidden', 'camo']) if (!Number.isInteger(s[k]) || s[k] < 0) return json({ ok: false, error: `bad stat ${k}` });
+      for (const k of ['score', 'rounds', 'camo']) if (!Number.isInteger(s[k]) || s[k] < 0) return json({ ok: false, error: `bad stat ${k}` });
       if (Object.keys(s).length !== 3) return json({ ok: false, error: 'wrong stats' });
       state.saved.push(s);
       const mine = state.board.find((e) => e.player_id === state.user.id);
-      const improved = !mine || s.rounds > mine.stats.rounds || (s.rounds === mine.stats.rounds && s.hidden > mine.stats.hidden);
+      const improved = !mine || s.score > mine.stats.score || (s.score === mine.stats.score && s.rounds > mine.stats.rounds);
       if (improved) {
-        if (mine) Object.assign(mine, { score: s.rounds, stats: s });
-        else state.board.push({ rank: 0, player_id: state.user.id, name: state.user.name, color: '#a55eea', score: s.rounds, stats: s });
-        state.board.sort((a, b) => b.stats.rounds - a.stats.rounds || b.stats.hidden - a.stats.hidden);
+        if (mine) Object.assign(mine, { score: s.score, stats: s });
+        else state.board.push({ rank: 0, player_id: state.user.id, name: state.user.name, color: '#a55eea', score: s.score, stats: s });
+        state.board.sort((a, b) => b.stats.score - a.stats.score || b.stats.rounds - a.stats.rounds);
         state.board.forEach((e, i) => (e.rank = i + 1));
       }
       const best = state.board.find((e) => e.player_id === state.user.id);
-      return json({ ok: true, result: { best: best.stats.rounds, improved, rank: best.rank, stats: best.stats } });
+      return json({ ok: true, result: { best: best.stats.score, improved, rank: best.rank, stats: best.stats } });
     }
     res.statusCode = 404;
     res.end('not found');

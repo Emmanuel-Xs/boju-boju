@@ -13,6 +13,8 @@ export const MASQUERADE_STATES = [
   'suspicious_lean',
   'catch_lunge',
   'victory_dance',
+  'spin_wind',
+  'spin_sweep',
 ] as const;
 export type MasqueradeState = (typeof MASQUERADE_STATES)[number];
 
@@ -85,6 +87,37 @@ const CLIPS: Record<MasqueradeState, Clip<MasqueradeState>> = {
       elbowL: { rx: -0.4 * k },
       footL: { pz: 0.26 * k },
       footR: { pz: -0.2 * k },
+    };
+  },
+  // The warning before a spin sweep: crouching, arms drawing up and out, the whole figure trembling.
+  spin_wind: (t) => {
+    const k = ease(t / 0.6);
+    const sh = Math.sin(t * 38) * 0.012 * k;
+    return {
+      root: { py: -0.05 * k + sh },
+      body: { rx: -0.08 * k, rz: Math.sin(t * 22) * 0.02 * k },
+      head: { rx: -0.2 * k },
+      shoulderL: { rx: -1.2 * k, rz: -1.15 * k },
+      shoulderR: { rx: -1.2 * k, rz: 1.15 * k },
+      elbowL: { rx: -0.25 * k },
+      elbowR: { rx: -0.25 * k },
+      footL: { pz: 0.1 * k },
+      footR: { pz: -0.1 * k },
+    };
+  },
+  // The sweep itself: arms straight out, on tiptoe. The turning is done by the whole figure, which is what flings the panels out.
+  spin_sweep: (t) => {
+    const s = Math.sin(t * 18);
+    return {
+      root: { py: 0.05 },
+      body: { rz: s * 0.02 },
+      head: { rx: -0.15 },
+      shoulderL: { rx: -1.57, rz: -1.57 },
+      shoulderR: { rx: -1.57, rz: 1.57 },
+      elbowL: { rx: -0.05 },
+      elbowR: { rx: -0.05 },
+      footL: { py: 0.05 },
+      footR: { py: 0.05 },
     };
   },
   // Spinning with arms up: the panels fly out.
@@ -197,6 +230,8 @@ export interface Masquerade {
   readonly group: THREE.Group;
   readonly animator: Animator<MasqueradeState>;
   play(state: MasqueradeState, blendTime?: number): void;
+  /** 0..1: the panels lift away from the body even when standing still (the warning before a spin sweep). */
+  lift: number;
   /** Call every frame. Panels swing with weight as `group` moves and flare out when it spins. */
   update(dt: number): void;
   dispose(): void;
@@ -565,7 +600,7 @@ export function createMasquerade(): Masquerade {
     const accLimit = 30;
     acc.clampLength(0, accLimit);
 
-    const flare = Math.min(0.33, Math.abs(yawRate) * 0.07); // 0.33 per segment bends the panels out to a nearly flat disc
+    const flare = Math.min(0.33, Math.max(Math.abs(yawRate) * 0.07, api.lift * 0.28)); // 0.33 per segment bends the panels out to a nearly flat disc
     for (const p of panels) {
       const [ox, oz] = p.out;
       const outward = vel.x * ox + vel.z * oz;
@@ -586,9 +621,10 @@ export function createMasquerade(): Masquerade {
     writePanels();
   }
 
-  return {
+  const api: Masquerade = {
     group,
     animator,
+    lift: 0,
     play: (state, blendTime) => animator.play(state, blendTime),
     update,
     dispose() {
@@ -602,6 +638,7 @@ export function createMasquerade(): Masquerade {
       owned.forEach((mt) => mt.dispose());
     },
   };
+  return api;
 }
 
 export type { Pose };

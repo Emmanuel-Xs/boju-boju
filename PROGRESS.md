@@ -93,3 +93,40 @@ Record each as a dry mono WAV, no music or reverb. The English glosses under the
 - Chicken clucks and a startled squawk when the player runs past.
 - A short "spotted" sting for when the cone first catches you (a recorded "Ehn!" would fit).
 - Cloth rustle for striking a pose.
+
+## Seeker fix + gameplay part 2 (dev branch)
+**Playtest problem:** the egungun could not reach corners, so corners were always safe.
+
+**What was really wrong (found by measuring, not guessing)**
+- The patrol only walked to the stand point 2 m in front of each hiding spot. Three spots in the south-east alley had stand points in pockets the 0.65 m body cannot path into, so the patrol picked them, failed, and fell back to the same few stops. Corners that were not hiding spots were never aimed at at all.
+- Catching needed the masquerade to run up to the player; a hider in a tight corner was out of reach.
+
+**Part 1 (done)**
+- Catch by sight: suspicion 1.0 + player visible within `catchRange` (6 m) = lunge toward them (0.5 s, no touching). Further away it closes in at `chaseSpeed` first. Config in `SEEKER_CONFIG`.
+- Nav: 0.5 m grid baked from the colliders (`src/nav.ts`), A*, string-pulled, corners rounded (`pathRound`). Body is a 0.6 m radius capsule; cloth panels are only drawn and never collide. The grid knows which cells are in the main walkable area (`mainArea`), so pockets are not used as stand points.
+- Patrol (`src/patrol.ts`): replaces the shuffled spot list. Every floor cell has an age; it walks to the stop that refreshes the most stale floor per second (age squared, so a forgotten corner beats a big area that went slightly stale). Stops = every hiding spot + a viewing stop for every floor corner + extra stops until every cell is seen. Anything unseen for 80 s forces a visit. Stuck on a stop = snoozed for 45 s. Ages persist across rounds of a run and reset on a new run. Also: a glimpse above `curiousAt` (0.2) sends it to take a closer look.
+- Level: the yard is now the whole play area (the road outside the gate is out of bounds, it was a free hiding place); the danfo moved 0.55 m west so the lane beside it is wide enough for the masquerade; the stack of chairs moved from the lane to the south wall (it plugged the way into the slot by the steps).
+- Dead-zone analysis (`src/levels/coverage.ts`, overlay `?zones` in dev, `src/levels/zonesOverlay.ts`): walks a line of sight from every cell the masquerade can stand on to every cell a player can stand on. **Result: no dead zones, nothing seen from three cells or fewer.** All 28 hiding spots are seeable at catch range. Two deliberate golden spots are tagged in `GOLDEN_SPOTS`: the slot between the danfo and the hollow-block steps (`block_steps`), and the pocket behind the water tank (`water_tank`, `zinc_fence`). They are still checked, they are just hard to catch someone in.
+
+**Part 2 (done)**
+1. Spin sweep: every 18 to 25 s (random) it twirls. 1 s warning (drum roll, panels lift, arms rise, orange ring on the floor, "SPIN SWEEP!" popup), then 1.5 s of 360 degree vision inside 5 m. `spin*` in `SEEKER_CONFIG`.
+2. Footprints (`src/levels/footprints.ts`, `src/levels/ground.ts`): running on bare dirt leaves prints, walking leaves none; one instanced mesh, 60 max, fade over 10 s. The masquerade notices fresh prints in its cone with a clear line to them and follows the trail print to print, then looks around. `print*`/`trail*` in `SEEKER_CONFIG`.
+3. Run home (`src/levels/gate.ts`): once the masquerade is more than 12 m from the gate, the gate glows green with a "RUN HOME" sign; touching it ends the round with a bonus (250 + 2 per second left). First time it is possible, a hint popup shows (remembered in localStorage).
+
+**Scoring**
+- Score = survival (2/s in the hunt) + near misses (8/s inside the cone, visible, within 8 m, not caught) + Ready early (2 per second of prep left) + run home bonus + camo bonus (round's average camo x 2, on clearing). Popups float up as they happen (per-second ones are grouped). The results screen shows the breakdown. All numbers in `RUN_CONFIG.score` / `RUN_CONFIG.runHome`.
+- `public/startng.json`: `score` (Score, highest), `rounds` (Rounds survived), `camo` (Best camo %). The game sends exactly those three whole numbers; the mock now checks that. The previous columns (rounds, hidden, camo) are gone from the board.
+
+**Tests** (headless Chrome, SwiftShader; the harness stubs the cloth and uses the 2D sight test so 180 s of game runs in ~5 s)
+- Bot hiders camped in every corner (62) and at every hiding spot (28), camo pinned at 100 so nothing is caught, 2 hunts (180 s) each: **62/62 corners and 28/28 spots checked** (seen in the cone with clear sight within 6 m). Median first check 27 s, 90th percentile 38 s, slowest 179.6 s (the far end of the south-east alley, before the forced-revisit time was cut from 100 s to 80 s; rerun below).
+- Catch rate within 2 hunts, 2 trials per spot: camo 20 = 52/56, camo 40 = 50/56, camo 55 = 22/56, camo 70 = 0/56. Median catch time 32 s at camo 20, 40 s at camo 40. By spot (camo 20, 4 trials): chairs_stack 4/4, zinc_fence 0/4, block_steps 0/4, water_tank 1/4; the last three are the golden pockets. Full per-spot tables are in the session log; every other spot was caught 2/2 at camo 20.
+- Catch by sight in a tight corner (4.3 m away, behind the lip of the building): lunge at 3.2 s. Far player (8 m): suspicious, then chase, lunge at 5.9 m.
+- Spin: telegraph at 21.5 s, spin 22.5 s, end 24.0 s, again 42.4 s; a player 3 m behind is noticed during the spin.
+- Prints: walking leaves 0, running on dirt leaves them, none left after 11 s; the masquerade followed an 8-print trail to its end and then looked around.
+- Run home: gate stays shut with the masquerade at 10 m from it; at 12+ m, touching it gave `{runHome: 426}` and the round cleared.
+- Mock start.ng received exactly `{"score":41,"rounds":0,"camo":0}`.
+- 3 full runs, 0 console errors; production bundle starts a round clean and contains none of the debug code. `npm run release` and `check-assets` pass.
+
+**Not verified:** how it feels (the numbers say corners are checked and bad camo gets caught; whether 90 s hunts and the 40-to-70 camo cliff are fun needs hands on a keyboard), real device fps with the new patrol (it costs about 100 to 450 ms once at load), audio by ear (the drum roll is the existing djembe hits sped up), touch.
+
+**Open for you:** confirm Part 2 feels good, then I do 4 (chickens snitch), 5 (memory), 6 (round twists) one at a time. Changing `startng.json` changes the live board's columns; the old rows' meaning (rounds/hidden/camo) may not carry over.
