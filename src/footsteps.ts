@@ -11,6 +11,8 @@ export const FOOTSTEP_CONFIG = {
   minSpeed: 0.5,
   player: { volume: 0.3, runVolume: 0.42, rateJitter: 0.08 },
   seeker: { volume: 0.75, rate: 0.78, rateJitter: 0.05, refDistance: 3, maxDistance: 26, rolloff: 1.4 },
+  /** What the masquerade's costume adds to each step: cloth swish every step, a shekere rattle on some (volumes are per clip, they were recorded at very different levels). */
+  costume: { swish: 1.6, rattleChance: 0.55, rattle: [0.22, 0.5] as [number, number] },
   /** How many recorded variations each surface has. */
   variations: 5,
 };
@@ -48,6 +50,12 @@ export class Stepper {
       void audio.playOnce(clip, { volume: run ? c.player.runVolume : c.player.volume, rate: 1 + (Math.random() * 2 - 1) * c.player.rateJitter });
     } else {
       const s = c.seeker;
+      const at = { position: { x, y: 1, z }, refDistance: s.refDistance, maxDistance: s.maxDistance, rolloff: s.rolloff };
+      void audio.playOnce('sfx_cloth_swish_01', { volume: c.costume.swish, rate: 0.9 + Math.random() * 0.2, spatial: at });
+      if (Math.random() < c.costume.rattleChance) {
+        const which = Math.random() < 0.5 ? 0 : 1;
+        void audio.playOnce(which === 0 ? 'sfx_egungun_rattle_01' : 'sfx_egungun_rattle_02', { volume: c.costume.rattle[which], rate: 0.95 + Math.random() * 0.1, spatial: at });
+      }
       void audio.playOnce(clip, {
         volume: s.volume,
         rate: s.rate + (Math.random() * 2 - 1) * s.rateJitter,

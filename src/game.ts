@@ -2,7 +2,7 @@
 //   Flow: lobby -> prep (the masquerade counts, eyes covered) -> hunt -> cleared (next round, sharper masquerade) or caught (results). Esc pauses.
 // DEV-only URL knobs (dev server only): &prep=SECONDS &hunt_s=SECONDS &markers=1 &ai=1 &stats=1 &seeker=0 &at=x,z &view=overview|top &camPos=x,y,z&camLook=x,y,z
 import * as THREE from 'three';
-import { audio, HORN_CLIPS, LAND_CLIPS, STEP_NAMES, UI_CLIPS } from './audio';
+import { audio, HEN_CLIPS, HORN_CLIPS, LAND_CLIPS, STEP_NAMES, UI_CLIPS, WORLD_CLIPS } from './audio';
 import { Stepper } from './footsteps';
 import { Coverage } from './levels/coverage';
 import { Footprints } from './levels/footprints';
@@ -78,7 +78,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   loadText.style.cssText = 'font:600 14px system-ui,sans-serif;opacity:.9';
   loadText.textContent = 'Loading the compound…';
   loading.append(loadTitle, loadBar, loadText);
-  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS] as const;
+  const LOAD_CLIPS = ['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', 'chant_intro', 'chant_ask', 'chant_not_yet', 'chant_open', 'chant_hunt', 'caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS] as const;
   let loaded = 0;
   const loadTotal = COMPOUND_ASSET_COUNT + LOAD_CLIPS.length;
   const tickLoad = () => {
@@ -201,6 +201,14 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   const roundHud = createRoundHud();
   const lyrics = createLyrics();
   if (seeker) {
+    // it gasps when it first suspects something
+    let lastGasp = -9;
+    seeker.onSpotted = () => {
+      if (performance.now() - lastGasp < 3000) return;
+      lastGasp = performance.now();
+      const at = seeker!.position;
+      void audio.playOnce('sfx_spotted_01', { volume: 1, rate: 0.85, spatial: { position: { x: at.x, y: 1.6, z: at.z }, refDistance: 3, maxDistance: 26, rolloff: 1.2 } });
+    };
     // the spin sweep is announced a second early: a drum roll, the panels lifting, and a warning on screen
     seeker.onSpinTelegraph = () => {
       audio.drumRoll(SEEKER_CONFIG.spinTelegraph);
@@ -300,7 +308,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   function startAmbience() {
     if (ambienceOn) return;
     ambienceOn = true;
-    void audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS]).then(() => {
+    void audio.preload(['amb_market', 'amb_generator', 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS]).then(() => {
       void audio.loop('amb_market', { volume: 0.28 });
       const g = level.generator;
       void audio.loop('amb_generator', { volume: 0.55, spatial: { position: { x: g.x, y: g.y, z: g.z }, refDistance: 2.5, maxDistance: 32, rolloff: 1.7 } });
@@ -314,6 +322,16 @@ export async function startGame(net: Net = localNet()): Promise<void> {
         window.setTimeout(horn, 18000 + Math.random() * 30000);
       };
       window.setTimeout(horn, 9000 + Math.random() * 9000);
+      // an idle cluck from a random hen, placed where she is
+      const cluck = () => {
+        if (mode === 'prep' || mode === 'hunt') {
+          const hens = chickens.positions();
+          const h = hens[Math.floor(Math.random() * hens.length)];
+          if (h) void audio.playOnce('sfx_hen_cluck_01', { volume: 0.35, rate: 0.9 + Math.random() * 0.25, spatial: { position: { x: h.x, y: 0.3, z: h.z }, refDistance: 2.5, maxDistance: 22, rolloff: 1.4 } });
+        }
+        window.setTimeout(cluck, 7000 + Math.random() * 9000);
+      };
+      window.setTimeout(cluck, 4000 + Math.random() * 4000);
     });
   }
 

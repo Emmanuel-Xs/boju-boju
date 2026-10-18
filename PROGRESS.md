@@ -142,3 +142,13 @@ Record each as a dry mono WAV, no music or reverb. The English glosses under the
 - A hen within 3 m of the player panics when the masquerade is within 8 m of that hen: it flaps, zigzags and squawks every 0.7 s for 2.6 s; the same hen cannot do it again for about 10 s. The masquerade turns to look at the squawk for 2.4 s (then goes back to its patrol), at most once per 5 s, and only when it is not busy or suspicious. A popup says "A chicken is giving you away!". Only in the hunt. Numbers in `CHICKEN_CONFIG` and `SEEKER_CONFIG.glance*`.
 - The squawk is synthesized (`audio.squawk`), a placeholder: a real hen squawk recording should replace it (still no Freesound key in this shell).
 - Tested: hen 2 m from the player and the masquerade 6 m from the hen = panic, 3 squawks in 1.5 s, masquerade facing the hen within 7 degrees; masquerade 10 m away = nothing; hen 4 m from the player = nothing; repeat inside the cooldown = nothing; prep (masquerade blind) = nothing; popup shown. 3 full runs, no console errors, production bundle clean.
+
+## Phase 4 continued: real sounds from Freesound (dev branch)
+The key is now in the shell (never written to any file; `raw-assets/` is gitignored; I scanned the repo for it). All eight clips are CC0 preview-hq-ogg, logged in CREDITS.md and `raw-assets/audio/SOURCES.json`.
+- Hen alarm call: `sfx_hen_squawk_01` (Rudmer_Rotteveel) and `sfx_hen_squawk_02` (Mastersoundboy2005) replace the synthesized squawk; placed where the hen is, pitch varied.
+- Hen cluck: `sfx_hen_cluck_01` (D4XX), a random hen every 7 to 16 s, placed in the world.
+- The masquerade's costume: `sfx_cloth_swish_01` on every step plus a shekere (`sfx_egungun_rattle_01`, jonopodmore, a Yoruba gourd shaker) or a metal rattle (`sfx_egungun_rattle_02`, zeffon) on about half of them, all spatial: you hear it coming.
+- `sfx_spotted_01`: a gasp when it first grows suspicious (once per 3 s).
+- `sfx_cloth_rustle_01`: striking a pose.
+- Levels: the clips were recorded very differently (the shekere peaks at +4.5 dBFS, the swish is 18 dB quieter), so each call carries its own volume; the limiter catches the rest. Tested that every sound triggers; not listened to by ear.
+- Still missing: real recorded chant lines (the YarnGPT2 stand-ins), see the ranked list in the Phase 4 entry above.

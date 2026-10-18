@@ -238,6 +238,7 @@ export class HidingController {
       this.snap = null;
     }
     this.pose = p;
+    void audio.unlock().then(() => audio.playOnce('sfx_cloth_rustle_01', { volume: 2 }));
   }
 
   private ndc(): THREE.Vector2 {

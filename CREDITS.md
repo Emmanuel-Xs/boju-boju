@@ -54,6 +54,14 @@ Licence for each: Creative Commons 0 (https://creativecommons.org/publicdomain/z
 | sfx_rooster_01.ogg | Rooster Crow 1 | BenjaminNelan | https://freesound.org/people/BenjaminNelan/sounds/435508/ |
 | sfx_horn_motorbike_01.ogg | 13FMikovaA_jawa klakson | 13FPanska_Mikova_Adela | https://freesound.org/people/13FPanska_Mikova_Adela/sounds/378336/ |
 | sfx_horn_motorbike_02.ogg | 13FMikovaA_simson klakson | 13FPanska_Mikova_Adela | https://freesound.org/people/13FPanska_Mikova_Adela/sounds/378351/ |
+| sfx_hen_squawk_01.ogg | Chicken Single Alarm Call | Rudmer_Rotteveel | https://freesound.org/people/Rudmer_Rotteveel/sounds/316920/ |
+| sfx_hen_squawk_02.ogg | Cartoon Chicken Loud Single Screaming Squawk sound effect | Mastersoundboy2005 | https://freesound.org/people/Mastersoundboy2005/sounds/727396/ |
+| sfx_hen_cluck_01.ogg | Chicken | D4XX | https://freesound.org/people/D4XX/sounds/607245/ |
+| sfx_egungun_rattle_01.ogg | Shekere Strike.wav | jonopodmore | https://freesound.org/people/jonopodmore/sounds/607221/ |
+| sfx_egungun_rattle_02.ogg | Rattle 01.flac | zeffon | https://freesound.org/people/zeffon/sounds/475827/ |
+| sfx_cloth_swish_01.ogg | Fabric Flap.wav | akennedybrewer | https://freesound.org/people/akennedybrewer/sounds/389170/ |
+| sfx_cloth_rustle_01.ogg | Jacket/Cloth Rustle 3 | brandondelehoy | https://freesound.org/people/brandondelehoy/sounds/494789/ |
+| sfx_spotted_01.ogg | Exaggerated Surprised Gasp! | CuboRodante | https://freesound.org/people/CuboRodante/sounds/812418/ |
 
 ## Generated sounds
 

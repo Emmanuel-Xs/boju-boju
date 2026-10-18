@@ -154,6 +154,8 @@ export class Seeker {
   onCaught: (() => void) | null = null;
   /** Called when the lunge starts (suspicion reached 1), a little before `onCaught`. */
   onCatchStart: (() => void) | null = null;
+  /** Called when it first grows suspicious (leans in): it gasps. */
+  onSpotted: (() => void) | null = null;
   /** The warning before a spin sweep starts / the sweep starts / it ends. */
   onSpinTelegraph: (() => void) | null = null;
   onSpinStart: (() => void) | null = null;
@@ -423,6 +425,7 @@ export class Seeker {
         } else if (this.suspicion >= cfg.leanAt && this.state !== 'suspicious') {
           this.endSpin(false);
           this.state = 'suspicious';
+          this.onSpotted?.();
           this.path = [];
         } else if (this.state === 'suspicious' && this.suspicion < cfg.leanExit) {
           if (this.lastSeen) this.startInvestigate(this.lastSeen.x, this.lastSeen.z, 'investigate: last seen');

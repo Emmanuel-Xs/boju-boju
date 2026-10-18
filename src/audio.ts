@@ -10,9 +10,12 @@ export const AMBIENCE_CLIPS = ['amb_market', 'amb_generator'] as const;
 export const HORN_CLIPS = ['sfx_horn_motorbike_01', 'sfx_horn_motorbike_02'] as const;
 export const STEP_NAMES = (['concrete', 'sand'] as const).flatMap((s) => [1, 2, 3, 4, 5].map((i) => `sfx_step_${s}_0${i}` as const));
 export const UI_CLIPS = ['sfx_ui_click_01', 'sfx_ui_click_02', 'sfx_ui_confirm_01', 'sfx_ui_back_01'] as const;
+/** Real recordings (Freesound, CC0): a hen's alarm call and a cluck, the masquerade's shekere rattle and cloth swish, a pose rustle, a gasp when it spots something. */
+export const HEN_CLIPS = ['sfx_hen_squawk_01', 'sfx_hen_squawk_02'] as const;
+export const WORLD_CLIPS = ['sfx_hen_cluck_01', 'sfx_egungun_rattle_01', 'sfx_egungun_rattle_02', 'sfx_cloth_swish_01', 'sfx_cloth_rustle_01', 'sfx_spotted_01'] as const;
 export const DRUM_CLIPS = ['drum_hit_01', 'drum_hit_02', 'drum_hit_03'] as const;
 export const LAND_CLIPS = ['sfx_hit_soft_01', 'sfx_hit_soft_02'] as const;
-export const SFX_CLIPS = [...HORN_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS] as const;
+export const SFX_CLIPS = [...HORN_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS, 'sfx_rooster_01', 'sfx_paint', 'jingle_win', 'jingle_caught', ...STEP_NAMES, ...UI_CLIPS] as const;
 export type ClipName =
   | (typeof CHANT_CLIPS)[number]
   | (typeof MUSIC_CLIPS)[number]
@@ -35,7 +38,7 @@ const CLIP_CHANNEL: Record<ClipName, Channel> = {
   sfx_paint: 'sfx',
   jingle_win: 'sfx',
   jingle_caught: 'sfx',
-  ...(Object.fromEntries([...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS].map((n) => [n, 'sfx'])) as Record<(typeof STEP_NAMES)[number] | (typeof UI_CLIPS)[number] | (typeof LAND_CLIPS)[number] | (typeof DRUM_CLIPS)[number], Channel>),
+  ...(Object.fromEntries([...STEP_NAMES, ...UI_CLIPS, ...LAND_CLIPS, ...DRUM_CLIPS, ...HEN_CLIPS, ...WORLD_CLIPS].map((n) => [n, 'sfx'])) as Record<(typeof STEP_NAMES)[number] | (typeof UI_CLIPS)[number] | (typeof LAND_CLIPS)[number] | (typeof DRUM_CLIPS)[number] | (typeof HEN_CLIPS)[number] | (typeof WORLD_CLIPS)[number], Channel>),
 };
 
 /** Clips that always sound far away unless the caller says `distant: false`. */
@@ -585,62 +588,11 @@ class AudioManager {
     return Object.fromEntries(CHANNELS.map((ch) => [ch, this.duckGain[ch] ? +this.duckGain[ch].gain.value.toFixed(3) : 1])) as Record<Channel, number>;
   }
 
-  // --- a hen's squawk, synthesized (a real recording should replace it): a harsh, wobbling rise and fall with a rasp of noise
+  // --- a hen's alarm call, placed where the hen is
 
-  squawk(x: number, z: number, volume = 0.5): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
-    const t = ctx.currentTime;
-    const dur = 0.34;
-    const out = ctx.createGain();
-    out.gain.setValueAtTime(0.0001, t);
-    out.gain.exponentialRampToValueAtTime(volume, t + 0.03);
-    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    const band = ctx.createBiquadFilter();
-    band.type = 'bandpass';
-    band.frequency.setValueAtTime(1500, t);
-    band.frequency.linearRampToValueAtTime(900, t + dur);
-    band.Q.value = 1.6;
-    const panner = ctx.createPanner();
-    panner.panningModel = 'equalpower';
-    panner.distanceModel = 'inverse';
-    panner.refDistance = 2;
-    panner.maxDistance = 30;
-    panner.rolloffFactor = 1.3;
-    setPannerPosition(panner, x, 0.3, z);
-    band.connect(out).connect(panner).connect(this.channelGain.sfx);
-    const voice = (type: OscillatorType, f0: number, f1: number, level: number) => {
-      const o = ctx.createOscillator();
-      o.type = type;
-      o.frequency.setValueAtTime(f0, t);
-      o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.45);
-      o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t + dur);
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = 38;
-      const depth = ctx.createGain();
-      depth.gain.value = f0 * 0.09;
-      lfo.connect(depth).connect(o.frequency);
-      const g = ctx.createGain();
-      g.gain.value = level;
-      o.connect(g).connect(band);
-      o.start(t);
-      lfo.start(t);
-      o.stop(t + dur + 0.02);
-      lfo.stop(t + dur + 0.02);
-    };
-    voice('sawtooth', 620, 980, 0.5);
-    voice('square', 930, 1400, 0.22);
-    const n = ctx.createBufferSource();
-    const nb = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
-    const d = nb.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.35;
-    n.buffer = nb;
-    n.connect(band);
-    n.start(t);
-    window.setTimeout(() => {
-      out.disconnect();
-      panner.disconnect();
-    }, (dur + 0.2) * 1000);
+  squawk(x: number, z: number, volume = 0.6): void {
+    const clip = HEN_CLIPS[Math.floor(Math.random() * HEN_CLIPS.length)];
+    void this.playOnce(clip, { volume, rate: 0.92 + Math.random() * 0.2, spatial: { position: { x, y: 0.3, z }, refDistance: 2.5, maxDistance: 30, rolloff: 1.2 } });
   }
 
   // --- drum roll: the warning before the masquerade's spin sweep
