@@ -19,6 +19,8 @@ export interface Hud {
   /** Colours picked so far, newest first; clicking one paints the selected zone with it. */
   setRecent(items: { color: THREE.Color; label: string }[]): void;
   toggleLegend(): void;
+  /** Show or hide the controls card (not on touch, where it never shows). */
+  setLegend(show: boolean): void;
   togglePalette(): void;
   /** Hide or show the whole painting HUD (the lobby and the results screen have none). */
   show(visible: boolean): void;
@@ -313,6 +315,9 @@ export function createHud(touch: boolean, h: HudHandlers): Hud {
           return b;
         }),
       );
+    },
+    setLegend(show) {
+      if (!touch) legend.style.display = show ? 'flex' : 'none';
     },
     toggleLegend() {
       legend.style.display = legend.style.display === 'none' ? 'flex' : 'none';

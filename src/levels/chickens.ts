@@ -20,18 +20,20 @@ export const CHICKEN_CONFIG = {
   /** Where they may roam (stay inside the yard: not through the gate, not onto the road). */
   area: { minX: -14.2, maxX: 14.2, minZ: -8.7, maxZ: 8.7 },
   /**
-   * Chickens snitch: one within snitchPlayerRange of the player panics and squawks while the masquerade is within snitchSeekerRange of the chicken.
-   * The panic lasts panicTime seconds (squawking every squawkEvery), and the same hen will not do it again for snitchCooldown seconds.
+   * Chickens are sentries. A hen that comes within noticeRange of the hider (during a hunt) freezes and stares for alertTime seconds, then panics:
+   * it bolts about squawking for panicTime seconds, squawking every squawkEvery, and any masquerade within hearRange of the squawk turns to look.
+   * The same hen will not do it again for snitchCooldown seconds.
    */
-  snitchPlayerRange: 3,
-  snitchSeekerRange: 8,
+  noticeRange: 4,
+  alertTime: 0.45,
+  hearRange: 14,
   panicTime: 2.6,
   squawkEvery: 0.7,
-  snitchCooldown: 7,
+  snitchCooldown: 9,
   plumage: ['#f2eee4', '#8a4b2a', '#2b2623', '#c8903f', '#a89a82', '#d9d2c0', '#6b3a22'],
 };
 
-type State = 'idle' | 'peck' | 'walk' | 'flee' | 'panic';
+type State = 'idle' | 'peck' | 'walk' | 'flee' | 'panic' | 'alert';
 
 /** A squawk heard this frame. `first` marks the start of a panic (the moment the masquerade turns to look). */
 export interface Squawk {
@@ -40,11 +42,10 @@ export interface Squawk {
   first: boolean;
 }
 
-/** Who the chickens are snitching to: set `active` only during the hunt. */
+/** Who the chickens are watching for: set `active` only during the hunt. */
 export interface Snitch {
   active: boolean;
   player: { x: number; z: number };
-  seekers: { x: number; z: number }[];
 }
 interface Hen {
   x: number;
@@ -210,15 +211,33 @@ export class Chickens {
           fz += dz / (d || 1);
         }
       }
-      // a chicken next to the hider, with the masquerade close by, gives them away
-      if (snitch?.active && snitch.seekers.length > 0 && h.snitchCd <= 0 && h.state !== 'panic' && Math.hypot(h.x - snitch.player.x, h.z - snitch.player.z) <= c.snitchPlayerRange && snitch.seekers.some((sk) => Math.hypot(h.x - sk.x, h.z - sk.z) <= c.snitchSeekerRange)) {
-        h.state = 'panic';
-        h.timer = c.panicTime;
-        h.snitchCd = c.snitchCooldown + c.panicTime;
-        h.squawkT = c.squawkEvery;
-        h.hopT = 0;
-        h.hopV = 2.4;
-        squawks.push({ x: h.x, z: h.z, first: true });
+      // a chicken that spots the hider stares for a moment, then gives them away
+      if (snitch?.active && h.state !== 'panic' && h.state !== 'alert') {
+        if (h.snitchCd <= 0 && Math.hypot(h.x - snitch.player.x, h.z - snitch.player.z) <= c.noticeRange) {
+          h.state = 'alert';
+          h.timer = c.alertTime;
+          h.hopV = 1.2; // a little start
+        }
+      }
+      if (h.state === 'alert') {
+        const dx = snitch ? snitch.player.x - h.x : 0;
+        const dz = snitch ? snitch.player.z - h.z : 0;
+        const d = Math.hypot(dx, dz);
+        const diff = Math.atan2(Math.sin(Math.atan2(dx, dz) - h.yaw), Math.cos(Math.atan2(dx, dz) - h.yaw));
+        h.yaw += Math.max(-9 * dt, Math.min(9 * dt, diff));
+        h.timer -= dt;
+        if (!snitch?.active || d > c.noticeRange * 1.5) {
+          h.state = 'idle';
+          h.timer = rand(this.r, c.idleTime);
+        } else if (h.timer <= 0) {
+          h.state = 'panic';
+          h.timer = c.panicTime;
+          h.snitchCd = c.snitchCooldown + c.panicTime;
+          h.squawkT = c.squawkEvery;
+          h.hopT = 0;
+          h.hopV = 2.4;
+          squawks.push({ x: h.x, z: h.z, first: true });
+        }
       }
       if (h.state === 'panic') {
         // flap and bolt in short zigzags, squawking
@@ -237,6 +256,7 @@ export class Chickens {
         }
       }
       if (scared && h.state !== 'flee' && h.state !== 'panic') {
+        // (an alert hen that is crowded bolts too)
         h.state = 'flee';
         h.timer = rand(this.r, c.fleeTime);
         h.hopV = 1.6 + this.r() * 0.6; // a startled hop
@@ -247,7 +267,7 @@ export class Chickens {
         h.timer = Math.max(h.timer, 0.35);
       }
 
-      h.timer -= dt;
+      if (h.state !== 'alert') h.timer -= dt;
       if (h.state === 'idle' && h.timer <= 0) {
         if (this.r() < 0.55) {
           h.state = 'peck';

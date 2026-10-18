@@ -124,6 +124,11 @@ export class HidingController {
     return performance.now() < this.cooldownUntil;
   }
 
+  /** The controls card at the bottom: shown for new players, tucked away once the teaching round is over. */
+  setLegend(show: boolean): void {
+    this.hud.setLegend(show);
+  }
+
   toast(msg: string): void {
     this.hud.toast(msg);
   }

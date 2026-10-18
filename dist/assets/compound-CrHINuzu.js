@@ -1,1 +1,0 @@
-export{i as createCompound}from"./game-CP82T2fc.js";

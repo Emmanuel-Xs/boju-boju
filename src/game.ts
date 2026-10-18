@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { audio, HEN_CLIPS, HORN_CLIPS, LAND_CLIPS, STEP_NAMES, UI_CLIPS, WORLD_CLIPS } from './audio';
 import { Stepper } from './footsteps';
-import { Coverage } from './levels/coverage';
+import { Coverage, COVERAGE_CONFIG } from './levels/coverage';
+import { Nav } from './nav';
 import { Footprints } from './levels/footprints';
 import { createGateMarker } from './levels/gate';
 import { onDirt } from './levels/ground';
@@ -22,6 +23,7 @@ import { createLyrics } from './levels/lyrics';
 import { createRoundHud } from './levels/roundHud';
 import { TopDownCamera } from './levels/topdown';
 import { difficultyFor, award, newStats, RUN_CONFIG, verdictFor, type RunStats } from './run';
+import { CamoHold } from './camoHold';
 import { Seeker, SEEKER_CONFIG, type SeekerHost } from './seeker';
 import { Rain } from './levels/rain';
 import { TWIST_CONFIG, twistsFor, type Twists } from './twists';
@@ -152,7 +154,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   scene.add(gateMarker.group);
   scene.add(chickens.group);
   let seeker: Seeker | null = null;
-  const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: coarse || dev('buttons'), hunt: false, eye: () => seeker?.eye ?? null });
+  const touchUi = coarse || dev('buttons');
+  const hiding = new HidingController({ level, player, fx, camera: rig.camera, scene, input, pos, touch: touchUi, hunt: false, eye: () => seeker?.eye ?? null });
   const seekerHost: SeekerHost = { colliders: level.colliders, bounds: level.bounds, spots: level.hidingSpots.map((s) => ({ id: s.id, position: s.position, facing: s.facing })), blocked: (a, b) => hiding.probe.blocked(a, b), prints };
   let seeker2: Seeker | null = null;
   if (!DEV || q.get('seeker') !== '0') {
@@ -234,6 +237,8 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   let weatherT = 0;
   const allSeekers = (): Seeker[] => (seeker ? (seeker2 && seeker2.group.visible ? [seeker, seeker2] : [seeker]) : []);
   let runStats: RunStats = newStats();
+  /** The camo stat: the best score held for CAMO_HOLD_SECONDS in a row in any hunt of this run. */
+  const camoHold = new CamoHold(cfg.camoHoldSeconds);
   let prepLeft = 0;
   let huntLeft = 0;
   let clearedLeft = 0;
@@ -360,6 +365,7 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     startAmbience();
     round = DEV ? Number(q.get('round') ?? 1) : 1;
     runStats = newStats();
+    camoHold.reset();
     lastScore = '';
     savedBest = false;
     seeker?.patrol.reset();
@@ -381,9 +387,18 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     pos.copy(spawn);
     yaw = 0;
     restoreLook();
+    // the controls card is for the teaching round; after that it gets out of the way (K brings it back)
+    hiding.setLegend(round <= cfg.teaching.rounds);
+    if (round === cfg.teaching.rounds + 1) hiding.toast('Controls card hidden. K shows it again.');
+    teach.t = 0;
+    teach.paint = { at: -99, n: 0 };
+    teach.pose = { at: -99, n: 0 };
+    teach.paintedAt = -1;
+    teach.gate = false;
     setTwists(twistsFor(round));
     if (seeker) {
       seeker.memory.decay(); // old habits fade a little every round
+      seeker.memory.stampRegulars(); // ...except the places you keep winning from
       seeker.memory.save();
       seeker.applyDifficulty(roundNumbers(round, false));
       seeker.frustrated = false;
@@ -440,6 +455,10 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     huntLeft = cfg.huntSeconds;
     readyWatch = -1;
     roundCamoSum = roundCamoTime = 0;
+    camoHold.beginHunt();
+    still.x = pos.x;
+    still.z = pos.z;
+    still.t = 0;
     pending.survival = pending.nearMiss = since.survival = since.nearMiss = 0;
     runHomeWasOpen = false;
     player.setHuntMode(true);
@@ -480,6 +499,10 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     award(runStats, 'camo', camoBonus);
     flushPopups(true);
     if (camoBonus > 0) roundHud.popup(`+${camoBonus} Camo bonus (${Math.round(avgCamo)}% average)`, '#7fd6ff', 2.4);
+    // won from a spot: the masquerade remembers it (the third time, it goes there first)
+    if (!ranHome && seeker && still.t >= cfg.regulars.stillSeconds && seeker.memory.won(still.x, still.z)) {
+      roundHud.popup('The masquerade has learned this hiding place', '#ff9d6d', 4.5);
+    }
     saveProgress(); // a cleared round counts even if the player never gets caught or closes the tab
     seeker?.memory.save();
     roundHud.banner(ranHome ? 'YOU MADE IT HOME!' : `ROUND ${round} CLEARED!`, '#1c7a3a55');
@@ -637,6 +660,18 @@ export async function startGame(net: Net = localNet()): Promise<void> {
   /** Tests can pin the camo score the masquerade sees (null = the real one). */
   let debugCamo: number | null = null;
   let runHomeWasOpen = false;
+  /** Where the hider has been staying this hunt: the anchor, and how long they have been within stillRadius of it. */
+  const still = { x: 0, z: 0, t: 0 };
+  /** The teaching round's hints: when each was last shown (s into prep) and how many times. */
+  const teach = { t: 0, paint: { at: -99, n: 0 }, pose: { at: -99, n: 0 }, paintedAt: -1, gate: false };
+  /** Shows a hint until the hider has done what it says, at most `hintMax` times, `hintRepeat` seconds apart. */
+  function teachHint(h: { at: number; n: number }, done: boolean, since: number, text: string) {
+    const t = cfg.teaching;
+    if (done || h.n >= t.hintMax || teach.t < since + t.hintDelay || teach.t - h.at < t.hintRepeat) return;
+    h.at = teach.t;
+    h.n++;
+    roundHud.popup(text, '#ffd68a', 6);
+  }
   let hintSeen = (() => {
     try {
       return localStorage.getItem('boju.runHomeHint') === '1';
@@ -686,9 +721,19 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       n.checkSpeed *= tc.second.speedMul;
       n.visionFovDeg *= tc.second.fovMul;
     }
-    // the closing-in and trail-following speeds are not part of the round ramp, but follow the same level and size tuning
-    const speed = lt.speed * (small ? tc.second.speedMul : 1);
-    return { ...n, chaseSpeed: SEEKER_CONFIG.chaseSpeed * speed, trailSpeed: SEEKER_CONFIG.trailSpeed * speed };
+    // the teaching round: slower, slower to suspect, no spin sweep (round 2 onward gets the plain ramp back)
+    const teach = r <= cfg.teaching.rounds && !small ? cfg.teaching : null;
+    if (teach) {
+      n.patrolSpeed *= teach.speedMul;
+      n.investigateSpeed *= teach.speedMul;
+      n.checkSpeed *= teach.speedMul;
+      n.rateMax *= teach.rateMul;
+    }
+    // the closing-in and trail-following speeds are not part of the round ramp, but follow the same level, size and teaching tuning
+    const speed = lt.speed * (small ? tc.second.speedMul : 1) * (teach?.speedMul ?? 1);
+    // only the first masquerade does spin sweeps, and not in the teaching round (applyDifficulty keeps what it is given, so always say)
+    const spinInterval: [number, number] = small || (teach && !teach.spin) ? [1e9, 1e9] : SEEKER_CONFIG.spinInterval;
+    return { ...n, chaseSpeed: SEEKER_CONFIG.chaseSpeed * speed, trailSpeed: SEEKER_CONFIG.trailSpeed * speed, spinInterval };
   }
 
   /** The second, smaller masquerade is built the first time a round needs it (it shares the first one's patrol, so they split the yard). */
@@ -829,12 +874,11 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     const squawks = chickens.update(dt, [{ x: pos.x, z: pos.z, running: res.speed > 3.6 }, ...(seeker ? [{ x: seeker.position.x, z: seeker.position.z, running: false }] : [])], {
       active: mode === 'hunt' && !!seeker && !seeker.blind && !seeker.frustrated,
       player: pos,
-      seekers: allSeekers().map((s) => s.position),
     });
     for (const sq of squawks) {
       void audio.squawk(sq.x, sq.z);
       if (sq.first) {
-        const near = allSeekers().find((s) => Math.hypot(s.position.x - sq.x, s.position.z - sq.z) <= 8 && s.glance(sq.x, sq.z));
+        const near = allSeekers().find((s) => Math.hypot(s.position.x - sq.x, s.position.z - sq.z) <= CHICKEN_CONFIG.hearRange && s.glance(sq.x, sq.z));
         if (near) roundHud.popup('A chicken is giving you away!', '#ffb347', 2);
       }
     }
@@ -843,6 +887,13 @@ export async function startGame(net: Net = localNet()): Promise<void> {
     // flow
     if (mode === 'prep') {
       prepLeft -= dt;
+      if (round <= cfg.teaching.rounds && readyWatch < 0) {
+        teach.t += dt;
+        const painted = hiding.painted.top || hiding.painted.bottom;
+        if (painted && teach.paintedAt < 0) teach.paintedAt = teach.t;
+        teachHint(teach.paint, painted, 0, touchUi ? 'Tap Eyedropper, then tap the wall behind you to paint your clothes like it' : 'Press E, aim at the wall behind you and click: your clothes take its colour');
+        teachHint(teach.pose, !painted || hiding.pose === 'wall_flat', teach.paintedAt, touchUi ? 'Now tap the Wall pose, with your back to the wall' : 'Now press 3 (wall_flat), with your back to the wall');
+      }
       if (prepLeft <= 0) requestReady(false);
       if (readyWatch > 0) {
         readyWatch -= dt;
@@ -858,7 +909,13 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       huntLeft -= dt;
       runStats.hiddenSeconds += dt;
       const camoNow = DEV && debugCamo !== null ? debugCamo : hiding.camo.breakdown.total;
-      runStats.bestCamo = Math.max(runStats.bestCamo, camoNow);
+      if (Math.hypot(pos.x - still.x, pos.z - still.z) > cfg.regulars.stillRadius) {
+        still.x = pos.x;
+        still.z = pos.z;
+        still.t = 0;
+      } else still.t += dt;
+      camoHold.add(camoNow, dt);
+      runStats.bestCamo = camoHold.best; // copied every frame, so a catch or a paint reset can't take it away
       roundCamoSum += camoNow * dt;
       roundCamoTime += dt;
       const sc = cfg.score;
@@ -873,14 +930,16 @@ export async function startGame(net: Net = localNet()): Promise<void> {
       flushPopups();
       // the way home
       const open = !!seeker && !seeker.blind && allSeekers().every((s) => Math.hypot(s.position.x - level.gate.x, s.position.z - level.gate.z) > cfg.runHome.seekerDistance);
-      if (open && !runHomeWasOpen && !hintSeen) {
+      const teaching = round <= cfg.teaching.rounds;
+      if (open && !runHomeWasOpen && (!hintSeen || (teaching && !teach.gate))) {
         hintSeen = true;
+        teach.gate = true;
         try {
           localStorage.setItem('boju.runHomeHint', '1');
         } catch {
           /* private mode: it just shows again next time */
         }
-        roundHud.popup('Run home! The gate is open: touch it now to end the round.', '#6dff9a', 5);
+        roundHud.popup(teaching ? 'The gate glows: run home!' : 'Run home! The gate is open: touch it now to end the round.', '#6dff9a', 5);
       }
       runHomeWasOpen = open;
       if (open && pos.x >= cfg.runHome.reachX && Math.abs(pos.z - level.gate.z) <= level.gate.halfWidth) runHome();
@@ -1050,9 +1109,9 @@ export async function startGame(net: Net = localNet()): Promise<void> {
         return rows.join('\n');
       },
       /** Where the masquerade can and cannot see (see levels/coverage.ts). */
-      coverage() {
+      coverage(cell?: number) {
         const t0 = performance.now();
-        const cov = new Coverage(level.colliders, level.bounds);
+        const cov = new Coverage(level.colliders, level.bounds, cell ? { ...COVERAGE_CONFIG, cell } : undefined);
         const counts = cov.viewCounts();
         const r = (z: { cx: number; cz: number; area: number; minX: number; maxX: number; minZ: number; maxZ: number }) => ({ at: [+z.cx.toFixed(1), +z.cz.toFixed(1)], area: z.area, x: [z.minX, z.maxX], z: [z.minZ, z.maxZ] });
         return {
@@ -1063,6 +1122,53 @@ export async function startGame(net: Net = localNet()): Promise<void> {
           thin: cov.thinZones(counts).slice(0, 25).map(r),
           corners: cov.corners().map((c) => [c.x, c.z, counts[c.cell]]),
         };
+      },
+      /**
+       * Places the player's real body fits (0.1 m grid) that the 0.5 m patrol grid has no cell for, further than `far` m from any cell:
+       * the patrol cannot see these as stale floor, so nobody ever looks into them. Returns the pockets as boxes.
+       */
+      gridGaps(far = 0.6) {
+        const cov = new Coverage(level.colliders, level.bounds);
+        const fine = new Nav(level.colliders, level.bounds, COVERAGE_CONFIG.playerRadius, 0.1);
+        const main = fine.mainArea();
+        const flagged: { x: number; z: number; k: number }[] = [];
+        for (let iz = 0; iz < fine.h; iz++)
+          for (let ix = 0; ix < fine.w; ix++) {
+            if (!main[iz * fine.w + ix]) continue;
+            const c = fine.centre(ix, iz);
+            if (cov.cellIndex(c.x, c.z) >= 0) continue;
+            let near = Infinity;
+            for (const cell of cov.cells) near = Math.min(near, Math.hypot(cell.x - c.x, cell.z - c.z));
+            if (near > far) flagged.push({ x: c.x, z: c.z, k: iz * fine.w + ix });
+          }
+        // group the flagged cells into pockets (8 neighbours)
+        const byK = new Map(flagged.map((f) => [f.k, f]));
+        const seen = new Set<number>();
+        const pockets: { at: number[]; x: number[]; z: number[]; area: number }[] = [];
+        for (const f of flagged) {
+          if (seen.has(f.k)) continue;
+          const stack = [f.k];
+          const cells: { x: number; z: number }[] = [];
+          seen.add(f.k);
+          while (stack.length) {
+            const k = stack.pop() as number;
+            cells.push(byK.get(k) as { x: number; z: number });
+            const ix = k % fine.w;
+            const iz = Math.floor(k / fine.w);
+            for (let dz = -1; dz <= 1; dz++)
+              for (let dx = -1; dx <= 1; dx++) {
+                const nk = (iz + dz) * fine.w + ix + dx;
+                if (byK.has(nk) && !seen.has(nk)) {
+                  seen.add(nk);
+                  stack.push(nk);
+                }
+              }
+          }
+          const xs = cells.map((c) => c.x);
+          const zs = cells.map((c) => c.z);
+          pockets.push({ at: [+(xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2), +(zs.reduce((a, b) => a + b, 0) / zs.length).toFixed(2)], x: [Math.min(...xs), Math.max(...xs)], z: [Math.min(...zs), Math.max(...zs)], area: +(cells.length * 0.01).toFixed(2) });
+        }
+        return pockets;
       },
       /** Runs the whole game logic (flow, player, camo, seeker, chickens) in fixed steps, ignoring the frame rate. Returns the seconds it ran. */
       sim(seconds: number, until?: () => boolean) {

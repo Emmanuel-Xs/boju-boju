@@ -14,6 +14,7 @@ import type { Nav } from './nav';
 import { Coverage, COVERAGE_CONFIG } from './levels/coverage';
 import { Patrol, type Stop } from './patrol';
 import { MEMORY_CONFIG, SeekerMemory } from './memory';
+import { exposureFor } from './suspicion';
 
 export const SEEKER_CONFIG = {
   // --- senses
@@ -34,8 +35,23 @@ export const SEEKER_CONFIG = {
   // --- suspicion
   /** Suspicion per second for a fully visible, completely uncamouflaged player at point-blank range. */
   rateMax: 1,
-  /** Exponent on (100 - camo) / 100. 2 makes a camo of 85 about 40 times less alarming than 0. */
-  exposurePower: 2,
+  /**
+   * How alarming a player is at each camo score, 0..1 (1 = the full `rateMax`), as [camo, exposure] points joined by straight lines.
+   * Not a smooth power law on purpose: a seeker that gets suspicious leans in and then catches, so a plain curve turns into a cliff
+   * (nearly everyone caught at 50, nearly nobody at 60). This one is flat-ish through 40 to 70 so the catch rate falls steadily across it.
+   */
+  exposureCurve: [
+    [0, 1],
+    [20, 0.62],
+    [30, 0.39],
+    [40, 0.28],
+    [50, 0.215],
+    [60, 0.18],
+    [70, 0.143],
+    [80, 0.117],
+    [90, 0.05],
+    [100, 0],
+  ] as [number, number][],
   /** Distance factor: 1 at the seeker's feet falling to `minDistanceFactor` at the edge of the cone... */
   minDistanceFactor: 0.15,
   /** ...and boosted this much inside `nearRadius`. */
@@ -754,7 +770,7 @@ export class Seeker {
       }
     } else this.visFrac = 0;
 
-    const exposure = ((100 - Math.min(100, Math.max(0, p.camo))) / 100) ** cfg.exposurePower;
+    const exposure = exposureFor(p.camo, cfg.exposureCurve);
     let distFactor = Math.min(1, Math.max(cfg.minDistanceFactor, 1 - d / cfg.visionRange));
     if (d < cfg.nearRadius) distFactor *= cfg.nearBoost;
     const visible = inCone && this.visFrac > 0;

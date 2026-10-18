@@ -216,7 +216,7 @@ export class Patrol {
     if (this.firstPick) {
       this.firstPick = false;
       const m = this.memory;
-      if (m && Math.random() < MEMORY_CONFIG.firstChance) {
+      if (m && Math.random() < (m.hasRegular ? MEMORY_CONFIG.regularFirstChance : MEMORY_CONFIG.firstChance)) {
         let hot = -1;
         let hv = MEMORY_CONFIG.hotFirst;
         for (let i = 0; i < m.heat.length; i++) {

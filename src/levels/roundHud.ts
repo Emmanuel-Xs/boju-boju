@@ -71,7 +71,7 @@ export function createRoundHud(): RoundHud {
   const pops = document.createElement('div');
   root.appendChild(pops);
   const placePops = () =>
-    css(pops, narrow() ? 'position:absolute;right:8px;top:118px;width:196px;display:flex;flex-direction:column;align-items:flex-end;gap:4px' : 'position:absolute;left:50%;top:112px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px');
+    css(pops, narrow() ? 'position:absolute;right:8px;top:118px;width:196px;display:flex;flex-direction:column;align-items:flex-end;gap:4px' : 'position:absolute;left:50%;top:112px;transform:translateX(-50%);width:min(560px,calc(100% - 24px));display:flex;flex-direction:column;align-items:center;gap:4px');
   placePops();
   addEventListener('resize', placePops);
 
@@ -91,8 +91,9 @@ export function createRoundHud(): RoundHud {
     },
     popup(text, color = '#d8fd71', seconds = 1.8) {
       while (pops.children.length >= 5) pops.firstElementChild?.remove();
+      pops.style.top = `${Math.round(top.getBoundingClientRect().bottom + 8)}px`; // just under the round bar, which is taller while the Ready button shows
       const el = document.createElement('div');
-      css(el, `font:800 ${narrow() ? 15 : 18}px system-ui;color:${color};text-shadow:0 2px 6px #000;background:#000a;border-radius:999px;padding:3px 12px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis`);
+      css(el, `font:800 ${narrow() ? 15 : 18}px system-ui;color:${color};text-shadow:0 2px 6px #000;background:#000a;border-radius:16px;padding:3px 12px;text-align:center;max-width:100%;box-sizing:border-box`);
       el.textContent = text;
       pops.appendChild(el);
       const a = el.animate([{ opacity: 0, transform: 'translateY(8px) scale(.9)' }, { opacity: 1, transform: 'translateY(0) scale(1)', offset: 0.12 }, { opacity: 1, offset: 0.75 }, { opacity: 0, transform: 'translateY(-14px)' }], { duration: seconds * 1000, easing: 'ease-out' });

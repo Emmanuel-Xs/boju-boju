@@ -16,6 +16,13 @@ export const RUN_CONFIG = {
   prepSeconds: 25,
   /** Seconds the hider must survive to clear a round. */
   huntSeconds: 90,
+  /**
+   * The masquerade remembers where you win. A round counts as won "from a spot" if you stayed within `stillRadius` m of it for the last
+   * `stillSeconds` before the round ended (running home does not count). The third win at one place makes it a regular (see hideouts.ts).
+   */
+  regulars: { stillSeconds: 12, stillRadius: 2.5 },
+  /** The camo stat only counts a score the hider kept for this many seconds without dropping below it. */
+  camoHoldSeconds: 3,
   /** After the seeker is told "ready" (button or timer), the chant needs this long at most to reach the hunt before we start it anyway. */
   chantTimeoutSeconds: 8,
   /** The celebration after a cleared round, before the next prep. */
@@ -45,6 +52,24 @@ export const RUN_CONFIG = {
     seekerDistance: 12,
     /** The player touches the gate by getting past this x, inside the opening. */
     reachX: 13.9,
+  },
+  /**
+   * Round 1 teaches. New players were being caught before they learned to paint, so for rounds up to `rounds` the masquerade is gentler
+   * and short hints say what to do. Round 2 onward is the plain ramp below.
+   */
+  teaching: {
+    rounds: 1,
+    /** Multiplier on every speed (walking, investigating, checking, closing in, following prints). */
+    speedMul: 0.75,
+    /** Multiplier on how fast suspicion rises. */
+    rateMul: 0.85,
+    /** No spin sweep while teaching. */
+    spin: false,
+    /** Seconds into prep before the first hint, and between repeats while the hider still has not done it. */
+    hintDelay: 1.5,
+    hintRepeat: 12,
+    /** Most times one hint is shown in a round. */
+    hintMax: 3,
   },
   /** How the masquerade sharpens (wider cone, faster suspicion, more peeks), round by round. All stay below what a running player can beat. */
   ramps: {
@@ -84,7 +109,7 @@ export interface RunStats {
   rounds: number;
   /** Seconds spent in hunts (shown on the results screen; not sent to start.ng). */
   hiddenSeconds: number;
-  /** Highest camo score reached during a hunt (0 to 100). */
+  /** Best camo score held for `camoHoldSeconds` in a row during any hunt of the run: a whole number, 0 to 100. */
   bestCamo: number;
   /** The ranked number: the sum of `parts`. */
   score: number;

@@ -46,6 +46,7 @@ const server = createServer((req, res) => {
     if (url.pathname === '/__state') return json(state);
     if (url.pathname === '/__score') {
       const s = JSON.parse(raw);
+      console.log(`[mock] startng:score received ${JSON.stringify(s)}`);
       for (const k of ['score', 'rounds', 'camo']) if (!Number.isInteger(s[k]) || s[k] < 0) return json({ ok: false, error: `bad stat ${k}` });
       if (Object.keys(s).length !== 3) return json({ ok: false, error: 'wrong stats' });
       state.saved.push(s);

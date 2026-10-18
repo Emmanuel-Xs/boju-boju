@@ -245,8 +245,10 @@ export async function createMarket(onAsset?: () => void): Promise<Compound> {
   cont.span(-13.6, 0, -4.6, -9.2, 2.4, -4.5, BLUE); // north wall
   cont.span(-13.6, 0, -2.2, -9.2, 2.4, -2.1, BLUE); // south wall
   cont.span(-13.7, 0, -4.6, -13.6, 2.4, -2.1, BLUE); // west end
-  cont.span(-13.8, 2.4, -4.7, -9.1, 2.55, -2.0, '#2a6a4d'); // roof
-  colliders.push(box(-13.6, -4.62, -9.2, -4.48, true), box(-13.6, -2.22, -9.2, -2.08, true), box(-13.72, -4.6, -13.58, -2.1, true));
+  // the container stands flush against the west wall: a 1 m slot behind it was somewhere to hide that the masquerade could never look into
+  cont.span(-14.7, 0, -4.6, -13.7, 2.4, -2.1, BLUE);
+  cont.span(-14.7, 2.4, -4.7, -9.1, 2.55, -2.0, '#2a6a4d'); // roof
+  colliders.push(box(-13.6, -4.62, -9.2, -4.48, true), box(-13.6, -2.22, -9.2, -2.08, true), box(-14.7, -4.6, -13.58, -2.1, true));
   surf('container', 'Inside the container shop', 'container', [-13.55, 1.2, -3.3], [0.2, 2.4, 2.2], [-1, 0, 0], cont.baseOf(BLUE));
   surf('container_side', 'Container side', 'container', [-11.4, 1.2, -4.55], [4.4, 2.4, 0.2], [0, 0, 1], cont.baseOf(BLUE));
   addMesh(cont.build());

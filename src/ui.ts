@@ -36,7 +36,7 @@ const GHOST = `font:700 14px system-ui,sans-serif;min-height:44px;padding:0 18px
 export class Screens {
   private root = el('div', 'position:fixed;inset:0;z-index:20;pointer-events:none;font-family:system-ui,sans-serif;color:#fff');
   private lobby = el('div', 'position:absolute;inset:0;display:none;overflow:auto;pointer-events:none');
-  private results = el('div', 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#150c0acc;overflow:auto;pointer-events:auto');
+  private results = el('div', 'position:absolute;inset:0;display:none;background:#150c0acc;overflow:auto;pointer-events:auto');
   private pause = el('div', 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#000a;pointer-events:auto');
   private card = el('div', `position:fixed;top:8px;left:8px;z-index:6;display:none;align-items:center;gap:10px;padding:6px 16px 6px 6px;border-radius:999px;background:#292a23e6;color:#fffefa;font-family:system-ui,sans-serif;pointer-events:none`);
   private cardFace = el('img', `width:44px;height:44px;border-radius:50%;background:${ACCENT};object-fit:cover`);
@@ -179,10 +179,11 @@ export class Screens {
   showResults(stats: RunStats, verdict: string, saveLine: string, board: BoardEntry[] | null, myId: number | null, signInButton: boolean): void {
     this.hideAll();
     this.results.replaceChildren();
-    const wrap = el('div', 'display:flex;flex-wrap:wrap;gap:16px;justify-content:center;padding:20px;max-width:900px');
-    const card = el('div', 'background:#291410f2;border:1px solid #fff3;border-radius:20px;padding:20px 22px;width:min(420px,100%);display:flex;flex-direction:column;gap:10px');
-    card.append(el('div', 'font:800 34px system-ui;letter-spacing:1px', 'Run over'));
-    const total = el('div', 'display:flex;justify-content:space-between;align-items:baseline;font:800 28px system-ui;padding:4px 0 8px;border-bottom:2px solid #fff4');
+    // margin:auto centres it when it fits and lets the page scroll from the top when it does not (align-items:center cut the top off)
+    const wrap = el('div', 'display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start;padding:16px;box-sizing:border-box;width:100%;max-width:960px;margin:auto');
+    const card = el('div', 'background:#291410f2;border:1px solid #fff3;border-radius:20px;padding:14px 20px 16px;width:min(420px,100%);box-sizing:border-box;display:flex;flex-direction:column;gap:6px');
+    card.append(el('div', 'font:800 28px system-ui;letter-spacing:1px', 'Run over'));
+    const total = el('div', 'display:flex;justify-content:space-between;align-items:baseline;font:800 26px system-ui;padding:2px 0 6px;border-bottom:2px solid #fff4');
     total.append(el('span', '', 'Score'), el('b', `color:${ACCENT}`, String(stats.score)));
     card.append(total);
     const rows: [string, string][] = [
@@ -193,14 +194,14 @@ export class Screens {
       ['Camo bonus', String(stats.parts.camo)],
       ['Rounds survived', String(stats.rounds)],
       ['Time hidden', clock(stats.hiddenSeconds)],
-      ['Best camo', `${stats.bestCamo}%`],
+      ['Best camo (held 3 s)', `${stats.bestCamo}%`],
     ];
     for (const [k, v] of rows) {
-      const r = el('div', 'display:flex;justify-content:space-between;font:600 16px system-ui;padding:4px 0;border-bottom:1px solid #fff2');
+      const r = el('div', 'display:flex;justify-content:space-between;font:600 15px system-ui;padding:2px 0;border-bottom:1px solid #fff2');
       r.append(el('span', 'opacity:.8', k), el('b', '', v));
       card.append(r);
     }
-    card.append(el('div', 'font:italic 600 15px/1.45 system-ui;margin:6px 0', `"${verdict}"`));
+    card.append(el('div', 'font:italic 600 14px/1.4 system-ui;margin:4px 0', `"${verdict}"`));
     if (saveLine) card.append(el('div', `font:700 13px system-ui;color:${ACCENT}`, saveLine));
     const buttons = el('div', 'display:flex;gap:10px;flex-wrap:wrap;margin-top:4px');
     const again = el('button', BUTTON, 'Play again');
@@ -215,7 +216,7 @@ export class Screens {
     }
     card.append(buttons);
     wrap.append(card);
-    if (board?.length) wrap.append(this.boardPanel('Top hiders', board, myId, 'width:min(420px,100%);align-self:flex-start'));
+    if (board?.length) wrap.append(this.boardPanel('Top hiders', board, myId, 'width:min(440px,100%);box-sizing:border-box;align-self:flex-start'));
     this.results.append(wrap);
     this.results.style.display = 'flex';
   }
