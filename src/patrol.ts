@@ -7,8 +7,8 @@ import type { SpotInfo } from './seeker';
 export const PATROL_CONFIG = {
   /** How far a look reaches from a stop (m): the catch range, because a look from further away rarely finds a camouflaged player. */
   lookRange: 6,
-  /** A look at a hiding spot covers this much each side of the spot's direction (rad). */
-  spotArc: 1.5,
+  /** A look at a hiding spot covers this much each side of the spot's direction (rad): the narrowest cone (26 deg half angle) plus a little of its 52 deg sweep, so a cell is only credited when the cone really passes over it. */
+  spotArc: 1.2,
   /** Age (s) every cell starts a run with, and the most age that counts towards a stop's score. */
   startAge: 45,
   ageCap: 240,
